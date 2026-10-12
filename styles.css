@@ -1,0 +1,172 @@
+ytmusic-tab-renderer.ytml-plus-host {
+  position: relative !important;
+}
+
+ytmusic-tab-renderer.ytml-plus-host > *:not(#ytml-plus-root):not(#ytml-plus-jump) {
+  display: none !important;
+}
+
+#ytml-plus-root {
+  position: relative;
+  overflow-y: auto;
+  overflow-x: hidden;
+  box-sizing: border-box;
+  padding: 48px 44px 40px 32px;
+  background-color: #0a0a0a;
+  background-image:
+    linear-gradient(180deg, var(--ytml-tint, rgba(255, 255, 255, 0.05)) 0%, rgba(0, 0, 0, 0) 55%),
+    radial-gradient(120% 55% at 88% 100%, rgba(255, 255, 255, 0.045), rgba(0, 0, 0, 0) 60%);
+  color-scheme: dark;
+  font-family: Roboto, "Segoe UI", Arial, sans-serif;
+  text-rendering: optimizeLegibility;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 56px, #000 calc(100% - 56px), transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 56px, #000 calc(100% - 56px), transparent 100%);
+}
+
+@keyframes ytml-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+#ytml-plus-root .ytml-line {
+  font-size: 25px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.24;
+  padding: 0.5em 0;
+  color: rgba(255, 255, 255, 0.28);
+  cursor: pointer;
+  user-select: none;
+  transform-origin: left center;
+  transition: color 0.28s ease, transform 0.28s ease, text-shadow 0.28s ease;
+  animation: ytml-in 0.55s cubic-bezier(0.22, 0.8, 0.35, 1) backwards;
+  animation-delay: calc(var(--i, 0) * 28ms);
+}
+
+#ytml-plus-root .ytml-line:hover {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+#ytml-plus-root .ytml-line.ytml-d1 {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+#ytml-plus-root .ytml-line.ytml-d2 {
+  color: rgba(255, 255, 255, 0.42);
+}
+
+#ytml-plus-root .ytml-line.ytml-d3 {
+  color: rgba(255, 255, 255, 0.26);
+}
+
+#ytml-plus-root .ytml-line.ytml-active {
+  color: #fff;
+  transform: scale(1.045);
+  text-shadow: 0 0 24px rgba(255, 255, 255, 0.28);
+}
+
+#ytml-plus-root .ytml-line.ytml-static {
+  cursor: default;
+  user-select: text;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 20px;
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 1.5;
+  padding: 0.3em 0;
+}
+
+#ytml-plus-root .ytml-line.ytml-static:hover {
+  color: #fff;
+}
+
+#ytml-plus-root .ytml-gap {
+  height: 1.2em;
+}
+
+#ytml-plus-root .ytml-status {
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 17px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  padding: 64px 0;
+  text-align: center;
+}
+
+#ytml-plus-root .ytml-credit {
+  margin-top: 64px;
+  padding-bottom: 24px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.28);
+}
+
+#ytml-plus-root .ytml-credit a {
+  color: rgba(255, 255, 255, 0.45);
+  text-decoration: none;
+}
+
+#ytml-plus-root .ytml-credit a:hover {
+  text-decoration: underline;
+}
+
+#ytml-plus-root::-webkit-scrollbar {
+  width: 8px;
+}
+
+#ytml-plus-root::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 4px;
+}
+
+#ytml-plus-root:hover::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+#ytml-plus-root::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+#ytml-plus-jump {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(30, 30, 30, 0.85);
+  color: #fff;
+  font: 600 13px Roboto, "Segoe UI", Arial, sans-serif;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  opacity: 0;
+  transform: translateY(6px);
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+#ytml-plus-jump.ytml-visible {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+#ytml-plus-jump:hover {
+  background: rgba(55, 55, 55, 0.9);
+}

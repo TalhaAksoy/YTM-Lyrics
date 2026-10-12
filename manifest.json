@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "YTM Lyrics+",
+  "version": "1.0.0",
+  "description": "Synchronized lyrics in YouTube Music, with click-to-seek playback.",
+  "icons": {
+    "16": "icons/ytm-lyrics-16.png",
+    "48": "icons/ytm-lyrics-48.png",
+    "128": "icons/ytm-lyrics-128.png"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://music.youtube.com/*"],
+      "js": ["content.js"],
+      "css": ["styles.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "host_permissions": ["https://lrclib.net/*"]
+}
