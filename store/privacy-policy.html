@@ -28,24 +28,24 @@
     <h1>Privacy Policy</h1>
     <p class="updated">Effective date: October 12, 2026</p>
 
-    <p class="summary">YTM Lyrics+ reads the current song details needed to find lyrics. It sends the song title and artist, and when available the album and track duration, to LRCLIB so it can return matching lyrics.</p>
+    <p class="summary">YTM Lyrics+ reads the current song details needed to find lyrics. It sends the song title and artist, and when available the album and track duration, to LRCLIB and lrc.cx so they can return matching lyrics. Results are cached locally in your browser so replayed songs load instantly, even offline.</p>
 
     <h2>Information the extension handles</h2>
-    <p>On YouTube Music, the extension checks the current player for the track title, artist, total duration, and playback position. When the lyrics view is available, it may also read the album name. It sends a lookup to LRCLIB only when lyrics are being shown and a cached result is not available. Playback position is used locally to highlight the current lyric line and is not sent to LRCLIB.</p>
+    <p>On YouTube Music, the extension checks the current player for the track title, artist, total duration, and playback position. When the lyrics view is available, it may also read the album name. It sends lookups to the lyrics providers only when lyrics are being shown and a locally cached result is not available. Playback position is used locally to highlight the current lyric line and is never transmitted.</p>
     <p>The extension does not read or collect your name, email address, account credentials, cookies, payment details, contacts, or activity on other websites.</p>
 
     <h2>How information is used and shared</h2>
-    <p>The extension uses the current track details only to look up lyrics. It sends an HTTPS request to <a href="https://lrclib.net/" rel="noreferrer">LRCLIB</a>, a third-party lyrics service. The request includes the track title and artist, with the album name and duration when available. If an exact lookup has no match, it makes a search request with the track title and artist. LRCLIB returns available synced or plain lyrics for display in YouTube Music.</p>
-    <p>LRCLIB receives these lookup details directly. Its own handling of requests is governed by its service and policies; the extension publisher does not control LRCLIB’s server-side logs or retention.</p>
+    <p>The extension uses the current track details only to look up lyrics. It sends HTTPS requests to two third-party lyrics services: <a href="https://lrclib.net/" rel="noreferrer">LRCLIB</a> and, if LRCLIB has no match, <a href="https://lrc.cx/" rel="noreferrer">lrc.cx</a>. Requests include the track title and artist, with the album name and duration when available. The services return available synced, word-timed, or plain lyrics for display in YouTube Music.</p>
+    <p>LRCLIB and lrc.cx receive these lookup details directly. Their own handling of requests is governed by their services and policies; the extension publisher does not control their server-side logs or retention.</p>
 
     <h2>Storage and retention</h2>
-    <p>YTM Lyrics+ does not operate a server and does not save track details to disk. It keeps a temporary in-memory cache while the YouTube Music page is open. That cache is cleared when the page or extension context is closed.</p>
+    <p>YTM Lyrics+ does not operate a server. Fetched lyrics are stored in Chrome’s local extension storage on your device (roughly up to 250 entries, kept up to 30 days; unsuccessful lookups up to 3 days), together with any per-song sync offsets you set. This data never leaves your browser and can be erased at any time by clearing the extension’s site data or removing it.</p>
 
     <h2>Limited use</h2>
-    <p>Track details are used only to provide the extension’s lyric lookup and synchronization features. They are not sold, used for advertising, or used to build a profile. The only third-party transfer is the lookup request to LRCLIB, which is necessary to return lyrics. The extension publisher does not review or retain the lookup details.</p>
+    <p>Track details are used only to provide the extension’s lyric lookup and synchronization features. They are not sold, used for advertising, or used to build a profile. The only third-party transfers are the lookup requests to LRCLIB and lrc.cx, which are necessary to return lyrics. The extension publisher does not review or retain the lookup details.</p>
 
     <h2>Your choices</h2>
-    <p>You can stop future lookups by closing the lyrics view, disabling YTM Lyrics+, or removing it from Chrome. Removing the extension clears its in-memory page cache.</p>
+    <p>You can stop future lookups by closing the lyrics view, disabling YTM Lyrics+, or removing it from Chrome. Removing the extension also deletes its locally cached lyrics and sync offsets.</p>
 
     <h2>Contact</h2>
     <p>For privacy questions, use the developer contact shown on the YTM Lyrics+ Chrome Web Store listing.</p>

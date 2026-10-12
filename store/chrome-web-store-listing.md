@@ -11,42 +11,48 @@
 
 ## Detailed description
 
-Follow along with lyrics while you listen on YouTube Music.
+Follow along with lyrics while you listen on YouTube Music — karaoke-style.
 
-YTM Lyrics+ adds a focused lyrics view to the YouTube Music player. Timed lyrics stay in sync with playback, and the current line is highlighted as the song plays. Click a timed line to jump to that point in the track. When synchronized lyrics are unavailable, the extension can show plain lyrics instead.
+YTM Lyrics+ adds a focused, zero-configuration lyrics view to the YouTube Music player. When word-timed lyrics are available, each word lights up as it's sung; otherwise the current line fills smoothly and stays centered as the song plays. Lyrics open automatically for songs that have them — no setup, no options to learn.
 
 **Features**
 
-- View lyrics in the YouTube Music player page.
-- Follow the current line as synchronized lyrics progress.
+- Word-by-word karaoke highlighting for supported songs.
+- Line-level synced lyrics with smooth progressive fill.
 - Click a lyric line to seek to its timestamp.
-- Show plain lyrics when timed lyrics are unavailable.
-- Fall back to lyrics text already available in YouTube Music when LRCLIB has no match.
-- See LRCLIB attribution and whether the lyrics are synchronized.
+- Right-click a line to re-sync lyrics that are slightly off — the offset is remembered per song.
+- Fullscreen lyrics mode with an auto-hiding cursor.
+- Offline-capable: fetched lyrics are cached locally, so replayed songs load instantly.
+- Plain lyrics when timed lyrics are unavailable.
+- Falls back to lyrics text already available in YouTube Music when no provider has a match.
+- Provider attribution shown under the lyrics.
 
-Open a track in YouTube Music and select the Lyrics tab. YTM Lyrics+ works only on `music.youtube.com` and does not require a separate account.
+Open a track in YouTube Music — lyrics appear on their own. YTM Lyrics+ works only on `music.youtube.com` and does not require a separate account.
 
-**Privacy:** To find lyrics, the extension sends the current track title and artist to LRCLIB. It also sends the album name and duration when available. Playback position stays in your browser. The extension does not sell this information, use it for ads, or store it on its own server. Read the full privacy policy at the URL provided in the Store listing.
+**Privacy:** To find lyrics, the extension sends the current track title and artist to LRCLIB and lrc.cx. It also sends the album name and duration when available. Playback position stays in your browser. Lyrics and sync offsets are cached locally on your device. The extension does not sell this information, use it for ads, or store it on its own server. Read the full privacy policy at the URL provided in the Store listing.
 
 ## Store privacy disclosure notes
 
 - Declare that the extension handles current-page website content: current track title and artist, and optionally album name and duration.
-- Explain that these details are transmitted to LRCLIB over HTTPS solely to retrieve lyrics.
-- Do not describe the data as never shared: LRCLIB receives the lookup request.
+- Explain that these details are transmitted to LRCLIB and lrc.cx over HTTPS solely to retrieve lyrics.
+- Do not describe the data as never shared: LRCLIB and lrc.cx receive the lookup request.
 - Playback position is used locally for line synchronization and is not transmitted.
+- Declare local storage usage: fetched lyrics and per-song sync offsets are cached in `chrome.storage.local` on the user's device; nothing is sent to a developer-operated server.
 - Confirm the developer contact displayed in the Store listing matches the Contact section of the privacy policy.
 
 ## Permission justifications for review
 
-### `host_permissions`: `https://lrclib.net/*`
+### `host_permissions`: `https://lrclib.net/*` and `https://api.lrc.cx/*`
 
-The background service worker makes HTTPS requests to LRCLIB’s `/api/get` endpoint and, if there is no exact match, `/api/search`. It sends the current track title and artist, with album name and duration when available, to retrieve lyrics. The extension does not contact other API hosts.
+The background service worker makes HTTPS requests to LRCLIB’s `/api/get` endpoint and, if there is no exact match, `/api/search`. If LRCLIB has no match, it queries lrc.cx’s `/jsonapi` endpoint, which can return word-timed lyrics. Both requests send the current track title and artist, with album name and duration when available, solely to retrieve lyrics. The extension does not contact other API hosts.
+
+### `permissions`: `storage`
+
+Fetched lyrics are cached in `chrome.storage.local` so replayed songs load instantly and work offline, and per-song sync offsets set by the user are remembered. All data stays on the user’s device; nothing is transmitted to a developer-operated server.
 
 ### Content script match: `https://music.youtube.com/*`
 
-The content script runs only on YouTube Music. It reads the current player’s track metadata, duration, and playback position; detects the Lyrics view; displays and synchronizes lyrics; and lets the user click a timed line to seek. The playback position remains local to the page. The script does not run on other websites.
-
-No additional Chrome API permissions are requested.
+The content script runs only on YouTube Music. It reads the current player’s track metadata, duration, and playback position; detects the Lyrics view; displays and synchronizes lyrics; lets the user click a timed line to seek or right-click a line to set a timing offset; and offers an optional fullscreen lyrics view. The playback position remains local to the page. The script does not run on other websites.
 
 ## Listing image checklist
 

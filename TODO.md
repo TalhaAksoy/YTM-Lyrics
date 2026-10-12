@@ -12,7 +12,7 @@
   cd youtube-music-lyrics
   zip -r ../ytm-lyrics-plus.zip manifest.json background.js content.js styles.css icons/ytm-lyrics-16.png icons/ytm-lyrics-48.png icons/ytm-lyrics-128.png
   ```
-- [ ] **Reload & smoke-test once more** — `chrome://extensions` → reload → YouTube Music → Lyrics tab (synced song + a song with disabled lyrics tab).
+- [ ] **Reload & smoke-test once more** — `chrome://extensions` → reload → YouTube Music → Lyrics tab. Cover: a synced song (line fill + auto-open), a karaoke song (word-by-word via lrc.cx), a song with a disabled lyrics tab, right-click re-sync + `↺ sync` reset, fullscreen (`⤢` + `Esc`), and a reload/replay to confirm the offline cache.
 
 ## Store form fields
 
