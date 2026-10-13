@@ -47,6 +47,11 @@ ytmusic-tab-renderer.ytml-plus-host > *:not(#ytml-plus-root):not(#ytml-plus-jump
   user-select: none;
   transform-origin: left center;
   transition: color 0.28s ease, transform 0.28s ease, text-shadow 0.28s ease;
+}
+
+/* Staggered intro only on a fresh track render — reparenting the root
+   (fullscreen enter/exit) must never re-run it. */
+#ytml-plus-root.ytml-anim .ytml-line {
   animation: ytml-in 0.55s cubic-bezier(0.22, 0.8, 0.35, 1) backwards;
   animation-delay: calc(var(--i, 0) * 28ms);
 }

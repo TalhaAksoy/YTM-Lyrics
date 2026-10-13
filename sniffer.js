@@ -158,6 +158,7 @@
         resJson.onResponseReceivedEndpoints[0].queueUpdateCommand.inlineContents &&
         resJson.onResponseReceivedEndpoints[0].queueUpdateCommand.inlineContents.playlistPanelRenderer &&
         resJson.onResponseReceivedEndpoints[0].queueUpdateCommand.inlineContents.playlistPanelRenderer.contents) ||
+      findPanelContents(resJson, 0) ||
       [];
 
     for (const c of contents) {
@@ -195,6 +196,95 @@
       }
     }
   }
+
+  // youtube.com /next for WEB_REMIX and music/get_queue responses place the
+  // queue panel at different paths — locate it by shape instead of position.
+  function findPanelContents(obj, depth) {
+    if (!obj || typeof obj !== 'object' || depth > 12) return null;
+    if (obj.playlistPanelRenderer && Array.isArray(obj.playlistPanelRenderer.contents)) {
+      return obj.playlistPanelRenderer.contents;
+    }
+    for (const k of Object.keys(obj)) {
+      const v = obj[k];
+      if (v && typeof v === 'object') {
+        const found = findPanelContents(v, depth + 1);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+
+  // ---- youtube.com: YTM-queue probe for the counterpart segmentMap ----
+  // youtube.com's own /next never carries playlistPanel counterparts — those
+  // only exist in YTM (WEB_REMIX) responses. A same-origin fetch from page JS
+  // needs no extra permissions; cookies ride along. Fed through handleNext,
+  // the same parser path as intercepted responses.
+  const probed = new Set();
+  async function probeQueue(videoId) {
+    if (!videoId || probed.has(videoId)) return;
+    probed.add(videoId);
+    if (probed.size > 64) probed.delete(probed.values().next().value);
+    let ctxClient = null;
+    try {
+      const ctx = window.ytcfg && window.ytcfg.get && window.ytcfg.get('INNERTUBE_CONTEXT');
+      ctxClient = ctx && ctx.client;
+    } catch {
+      /* ytcfg missing — bare client still works */
+    }
+    const client = Object.assign({}, ctxClient, {
+      clientName: 'WEB_REMIX',
+      clientVersion: '1.20251008.01.00',
+    });
+    const post = async (path, body) => {
+      try {
+        const r = await origFetch(path, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            // Innertube routes on these headers more than on context.client
+            'X-YouTube-Client-Name': '67', // WEB_REMIX
+            'X-YouTube-Client-Version': client.clientVersion,
+          },
+          credentials: 'include',
+          body: JSON.stringify(Object.assign({ context: { client } }, body)),
+        });
+        if (!r.ok) {
+          emit('probe', { videoId, path, status: r.status });
+          return null;
+        }
+        return await r.json();
+      } catch (e) {
+        emit('probe', { videoId, path, err: String((e && e.message) || e) });
+        return null;
+      }
+    };
+
+    const next = await post('/youtubei/v1/next?prettyPrint=false', {
+      videoId,
+      isAudioOnly: false,
+      // Mirrors what YTM actually sends on a music-video watch — the
+      // persistent-panel flags are what make the backend wrap queue
+      // entries with song<->video counterparts and their segmentMap.
+      enablePersistentPlaylistPanel: true,
+      tunerSettingValue: 'AUTOMIX_SETTING_NORMAL',
+      watchEndpointMusicSupportedConfigs: {
+        watchEndpointMusicConfig: {
+          hasPersistentPlaylistPanel: true,
+          musicVideoType: 'MUSIC_VIDEO_TYPE_OMV',
+        },
+      },
+    });
+    if (next) handleNext({ videoId }, next);
+    const got = metaByVideo.get(videoId);
+    emit('probe', { videoId, path: 'next', status: next ? 200 : 0, segMap: got && got.segMap ? got.segMap.length : 0 });
+    // Note: youtube.com /next strips counterpart segmentMaps regardless of
+    // request params — queue metadata above is still useful for lookups.
+  }
+
+  document.addEventListener('ytml-probe', e => {
+    const id = e && e.detail && e.detail.videoId;
+    if (id) probeQueue(id);
+  });
 
   // ---- youtube.com: "Music in this video" structured rows ----
   // Engagement panels carry Song/Artist/Album rows for official music uploads.

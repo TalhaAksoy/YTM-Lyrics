@@ -15,14 +15,14 @@ Karaoke-style synchronized lyrics for YouTube Music **and youtube.com** — a ze
 - **Opens itself** — when synced lyrics are found for a song, the Lyrics tab opens automatically (once per song; if you switch away, it stays away — and it can be turned off in the popup).
 - **Click a line to seek** — any timed line jumps playback to its timestamp.
 - **Right-click to re-sync** — if lyrics are slightly off (different intros on YouTube versions), right-click the line that should be playing. The offset is remembered per song.
-- **Auto video↔song timing** — when a music video plays, YouTube's own segment map shifts lyric timestamps to match (intro/outro/cut differences handled automatically; manual re-sync still available on top).
+- **Auto video↔song timing** — when a music video plays on YouTube Music, YouTube's own segment map shifts lyric timestamps to match (intro/outro/cut differences handled automatically; manual re-sync still available on top).
 - **Internal player bridge** — metadata, seeking, and prev/next go through YouTube Music's own player API (videoId-accurate), not fragile DOM scraping; DOM selectors remain as graceful fallbacks.
 - **Fullscreen lyrics** — a floating button expands into a premium fullscreen view: glowing album art, track info, full playback controls (prev/play/next + seek bar), and an auto-hiding cursor. `Esc` exits.
 - **Works offline** — fetched lyrics and your sync offsets are cached in `chrome.storage`, so previously played songs show lyrics instantly — even with no connection.
 - **Works when YouTube Music has no lyrics** — if the Lyrics tab is disabled for a song, YTM Lyrics+ enables it and pulls lyrics from LRCLIB or lrc.cx instead.
 - **Smart fallbacks** — LRCLIB synced → LRCLIB plain → lrc.cx karaoke (TTML) → lrc.cx synced (LRC) → YouTube Music's own lyrics (restyled) → original UI untouched if nothing is found.
 - **Ad-safe metadata** — track info is read from the player bar / player API, and lyric syncing freezes during ads, so ads can't poison the lyrics lookup.
-- **Works on youtube.com too** — on regular YouTube, a lyrics card appears at the top of the right column on watch pages — but only for music videos (detected via YouTube's own "Music in this video" metadata, the Music category, and `- Topic` channels, not blind guessing). Toggleable from the popup.
+- **Works on youtube.com too** — on regular YouTube, the lyrics view docks inside the player next to music videos (detected via YouTube's own "Music in this video" metadata, the Music category, and `- Topic` channels, not blind guessing). Toggleable from the popup. YouTube support is best-effort — **YouTube Music is recommended** for the most accurate sync and coverage.
 - **Ambient design** — album-art tinted background, distance-based line fading, smooth transitions.
 
 ## Install

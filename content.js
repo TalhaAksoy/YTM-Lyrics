@@ -65,6 +65,9 @@
   let ytCardHidden = false; // session toggle from the in-player button
   const ytDismissed = new Set(); // videoId keys hidden via the card's × button
   const ytForced = new Set(); // videoId keys force-opened on non-music videos
+  let ytProbeKey = null; // last track.key we asked the sniffer to probe for segMap
+  let wantLineAnim = false; // arm the line-stagger animation only per track
+  let animTimer = null;
   let toastTimer = null;
   let jumpRaf = false;
   let fullscreen = false;
@@ -137,6 +140,8 @@
         }
       }
       schedule();
+    } else if (d.type === 'probe') {
+      dbg('yt: probe', d);
     }
     } catch (err) {
       dbg('sniffed handler error', err);
@@ -553,6 +558,7 @@
     clearTimeout(cursorTimer);
     fsPaused = null;
     if (panel && panel.isConnected && root) {
+      root.classList.remove('ytml-anim');
       panel.appendChild(root);
       placeControls();
       if (fsWrap) fsWrap.remove();
@@ -1021,6 +1027,16 @@
       dbg('segMap applied:', currentMeta.segMap.length, 'segments');
     }
     renderLines();
+    if (wantLineAnim && root) {
+      wantLineAnim = false;
+      root.classList.add('ytml-anim');
+      clearTimeout(animTimer);
+      // enough for the longest staggered line to finish, then disarm — the
+      // class must not survive into a reparent or lines re-animate there.
+      animTimer = setTimeout(() => {
+        if (root) root.classList.remove('ytml-anim');
+      }, lyrics.lines.length * 28 + 700);
+    }
     if (res.synced) {
       const v = getVideo();
       if (v) {
@@ -1158,6 +1174,14 @@
       teardown();
       return;
     }
+    if (IS_YT && ytProbeKey !== track.key) {
+      ytProbeKey = track.key;
+      // Ask the MAIN-world sniffer for YTM's queue data — the counterpart
+      // segmentMap corrects song-timed lyrics onto the music video's timeline.
+      try {
+        document.dispatchEvent(new CustomEvent('ytml-probe', { detail: { videoId: track.videoId } }));
+      } catch { /* noop */ }
+    }
     forceEnableLyricsTab();
     const cached = cache.get(track.key);
     if (cached === 'none') {
@@ -1176,6 +1200,7 @@
       currentMeta = track.meta || null;
       lastResult = null;
       segMapApplied = false;
+      wantLineAnim = true;
       currentOffset = offsetFor(track.key);
       updateSyncChip();
       if (fullscreen) updateFsMeta();
@@ -1399,6 +1424,7 @@
     if (!root || !lyrics || !lyrics.lines || !lyrics.lines.length) return;
     fullscreen = true;
     buildFsUI();
+    root.classList.remove('ytml-anim');
     fsStage.insertBefore(root, fsBarEl);
     document.body.appendChild(fsWrap);
     document.body.classList.add('ytml-fs');
