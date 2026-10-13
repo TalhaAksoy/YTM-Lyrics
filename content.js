@@ -64,6 +64,7 @@
   let ytCtrlBtn = null; // youtube.com: .ytp-right-controls toggle button
   let ytCardHidden = false; // session toggle from the in-player button
   const ytDismissed = new Set(); // videoId keys hidden via the card's × button
+  const ytForced = new Set(); // videoId keys force-opened on non-music videos
   let toastTimer = null;
   let jumpRaf = false;
   let fullscreen = false;
@@ -91,6 +92,12 @@
     try {
       if (window.__ytmlDebug || localStorage.getItem('ytmlDebug') === '1') console.log('[ytml+]', ...a);
     } catch { /* noop */ }
+  };
+  const dbgSeen = new Set();
+  const dbgOnce = (tag, ...a) => {
+    if (dbgSeen.has(tag)) return;
+    dbgSeen.add(tag);
+    dbg(...a);
   };
 
   // ---- MAIN-world bridges (player-bridge.js + sniffer.js) ----
@@ -465,7 +472,10 @@
       close.title = 'Hide lyrics for this video';
       close.setAttribute('aria-label', 'Hide lyrics for this video');
       close.addEventListener('click', () => {
-        if (trackKey) ytDismissed.add(trackKey);
+        if (trackKey) {
+          ytDismissed.add(trackKey);
+          ytForced.delete(trackKey);
+        }
         teardown();
       });
       ytPanelEl.appendChild(close);
@@ -495,14 +505,28 @@
         '<svg viewBox="0 0 24 24" width="100%" height="100%" style="display:block">' +
         '<path fill="currentColor" d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z"/></svg>';
       ytCtrlBtn.addEventListener('click', () => {
-        ytCardHidden = !ytCardHidden;
-        ytCtrlBtn.classList.toggle('ytml-off', ytCardHidden);
-        ytCtrlBtn.setAttribute('aria-pressed', String(!ytCardHidden));
-        if (ytCardHidden) teardown();
-        else update();
+        const t = getTrack();
+        if (t && !t.isMusic) {
+          if (ytForced.has(t.key)) { ytForced.delete(t.key); teardown(); }
+          else { ytForced.add(t.key); ytCardHidden = false; update(); }
+        } else {
+          ytCardHidden = !ytCardHidden;
+          if (ytCardHidden) teardown();
+          else update();
+        }
+        refreshYtCtrlBtn(t);
       });
     }
     if (ytCtrlBtn.parentNode !== host) host.prepend(ytCtrlBtn);
+  }
+
+  // non-music video: the button force-opens the panel for that video only —
+  // detection misses happen, and "No lyrics found" is better than nothing.
+  function refreshYtCtrlBtn(t) {
+    if (!ytCtrlBtn) return;
+    const active = t && !t.isMusic ? ytForced.has(t.key) : !ytCardHidden;
+    ytCtrlBtn.classList.toggle('ytml-off', !active);
+    ytCtrlBtn.setAttribute('aria-pressed', String(active));
   }
 
   function findPanel() {
@@ -1109,23 +1133,24 @@
       // Stay invisible outside watch pages and when disabled; freeze during ads
       // (ad-showing swaps player data — keep the panel, just stop updating).
       if (!prefs.yt || location.pathname !== '/watch') {
-        dbg('yt: inactive', { yt: prefs.yt, path: location.pathname });
+        dbgOnce('inact:' + location.pathname + ':' + prefs.yt, 'yt: inactive', { yt: prefs.yt, path: location.pathname });
         teardown();
         return;
       }
       if (playerSnap && playerSnap.ad) {
-        dbg('yt: ad freeze');
+        dbgOnce('adfreeze', 'yt: ad freeze');
         return;
       }
       ensureYtCtrlBtn();
     }
     const track = getTrack();
     if (!track) {
-      if (IS_YT) dbg('yt: no track', { snap: !!playerSnap, vid: playerSnap && playerSnap.videoId });
+      if (IS_YT) dbgOnce('nt:' + (playerSnap && playerSnap.videoId), 'yt: no track', { snap: !!playerSnap });
       return;
     }
-    if (IS_YT && !track.isMusic) {
-      dbg('yt: not music —', { cat: playerSnap && playerSnap.category, mvt: playerSnap && playerSnap.mvType, author: playerSnap && playerSnap.artist, music: track.meta && track.meta.music });
+    if (IS_YT) refreshYtCtrlBtn(track);
+    if (IS_YT && !track.isMusic && !ytForced.has(track.key)) {
+      dbgOnce('nm:' + track.key, 'yt: not music —', { cat: playerSnap && playerSnap.category, mvt: playerSnap && playerSnap.mvType, author: playerSnap && playerSnap.artist, music: track.meta && track.meta.music });
       teardown();
       return;
     }

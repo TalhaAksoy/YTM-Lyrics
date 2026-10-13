@@ -106,14 +106,14 @@ ytmusic-tab-renderer.ytml-plus-host > *:not(#ytml-plus-root):not(#ytml-plus-jump
 }
 
 /* ---- youtube.com watch page: in-player split view ---- */
-/* The lyrics card lives inside #movie_player. `.ytml-split` letterboxes the
-   video into the left share and shrinks the control bar to match; the panel
-   takes the right slice. Page layout outside the player is untouched. */
+/* The lyrics card lives inside #movie_player's right slice, ending just above
+   the seekbar/control row. `.ytml-split` GPU-scales the video into the left
+   share. Page layout and YouTube's own chrome stay untouched. */
 #ytml-ytpanel {
   position: absolute;
   top: 0;
   right: 0;
-  bottom: 0;
+  bottom: 76px; /* above the seekbar + control row — YouTube's chrome stays untouched */
   width: calc(var(--ytml-lyrics-f, 0.2) * 100%);
   min-width: 150px;
   z-index: 40;
@@ -130,12 +130,9 @@ ytmusic-tab-renderer.ytml-plus-host > *:not(#ytml-plus-root):not(#ytml-plus-jump
   transform-origin: left center !important;
 }
 
-/* Keep every player control inside the video's share so nothing slides under
-   the lyrics slice — over-constrained LTR boxes resolve via left+width. */
-#movie_player.ytml-split:not(.ytp-mini) .ytp-chrome-bottom {
-  width: calc((1 - var(--ytml-lyrics-f, 0.2)) * 100% - 24px) !important;
-}
-
+/* Only the top chrome is pulled left so its buttons stay reachable — it is
+   pure layout, no JS measurement. chrome-bottom/seekbar are left alone: their
+   scrubber math is computed from the full player width and desyncs if shrunk. */
 #movie_player.ytml-split:not(.ytp-mini) .ytp-chrome-top {
   width: calc((1 - var(--ytml-lyrics-f, 0.2)) * 100%) !important;
 }
