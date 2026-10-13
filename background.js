@@ -53,19 +53,25 @@ async function fromLRCLIB(track) {
   });
   const list = await fetchJson(`${LRCLIB}/search?${searchParams}`);
   if (Array.isArray(list) && list.length) {
-    return lrclibToLyrics(pickBestLrclib(list, track.duration));
+    return lrclibToLyrics(pickBestLrclib(list, track));
   }
   return null;
 }
 
-function pickBestLrclib(list, duration) {
+// A wrong-song match is worse than no lyrics: candidates must verify against
+// the requested title and artist before duration/sync quality is even scored.
+function pickBestLrclib(list, track) {
+  const wantTitle = norm(track.title);
+  const wantArtist = norm(track.artist);
   let best = null;
   let bestScore = Infinity;
   for (const item of list) {
     if (!item || (!item.syncedLyrics && !item.plainLyrics)) continue;
+    if (!titleOk(wantTitle, norm(item.trackName))) continue;
+    if (!artistOk(wantArtist, norm(item.artistName))) continue;
     let score = item.syncedLyrics ? 0 : 1000;
-    if (typeof item.duration === 'number' && duration) {
-      score += Math.abs(item.duration - duration);
+    if (typeof item.duration === 'number' && track.duration) {
+      score += Math.abs(item.duration - track.duration);
     }
     if (score < bestScore) {
       bestScore = score;
@@ -121,11 +127,13 @@ function pickBestLrccx(list, track) {
   let bestScore = Infinity;
   for (const item of list) {
     if (!item || (!item.lrc_ttml && !item.lrc)) continue;
-    let score = item.lrc_ttml ? 0 : 400;
     const title = norm(item.title);
     const artist = norm(item.artist);
-    if (wantTitle && title !== wantTitle) score += title.includes(wantTitle) || wantTitle.includes(title) ? 30 : 80;
-    if (wantArtist && !(artist.includes(wantArtist) || wantArtist.includes(artist))) score += 50;
+    if (!titleOk(wantTitle, title)) continue;
+    if (!artistOk(wantArtist, artist)) continue;
+    let score = item.lrc_ttml ? 0 : 400;
+    if (wantTitle && title !== wantTitle) score += 30;
+    if (wantArtist && artist !== wantArtist) score += 20;
     if (typeof item.duration === 'number' && track.duration) {
       score += Math.min(Math.abs(item.duration - track.duration) * 4, 120);
     }
@@ -136,6 +144,29 @@ function pickBestLrccx(list, track) {
     }
   }
   return best;
+}
+
+function contained(shorter, longer, minLen) {
+  return shorter.length >= minLen && longer.includes(shorter);
+}
+
+function titleOk(want, got) {
+  if (!want) return true;
+  if (!got) return false;
+  if (want === got) return true;
+  const [s, l] = want.length <= got.length ? [want, got] : [got, want];
+  return contained(s, l, 6);
+}
+
+function artistOk(want, got) {
+  if (!want) return true;
+  if (!got) return false;
+  if (want === got) return true;
+  const [s, l] = want.length <= got.length ? [want, got] : [got, want];
+  if (contained(s, l, 5)) return true;
+  const stop = new Set(['the', 'feat', 'ft', 'and', 'with', 'x']);
+  const gb = new Set(got.split(' '));
+  return want.split(' ').some(t => t.length >= 3 && !stop.has(t) && gb.has(t));
 }
 
 function norm(s) {

@@ -11,6 +11,15 @@
   "background": {
     "service_worker": "background.js"
   },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "YTM Lyrics+",
+    "default_icon": {
+      "16": "icons/ytm-lyrics-16.png",
+      "48": "icons/ytm-lyrics-48.png",
+      "128": "icons/ytm-lyrics-128.png"
+    }
+  },
   "permissions": ["storage"],
   "content_scripts": [
     {

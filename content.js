@@ -6,8 +6,9 @@
   const HOST_CLASS = 'ytml-plus-host';
   const POLL_MS = 800;
 
-  const STORE_LYRICS = 'ytmlCache'; // {key: {data, ts}}
+  const STORE_LYRICS = 'ytmlCacheV2'; // {key: {data, ts}} — bumped: pre-v1.1 matches weren't title-verified
   const STORE_OFFSETS = 'ytmlOffsets'; // {key: seconds}
+  const STORE_PREFS = 'ytmlPrefs'; // {fill, autoOpen}
   const STORE_CAP = 250;
   const TTL_LYRICS = 30 * 24 * 3600e3;
   const TTL_NONE = 3 * 24 * 3600e3;
@@ -43,6 +44,18 @@
   let fsBtn = null;
   let syncChip = null;
   let toastEl = null;
+  let fsWrap = null;
+  let fsStage = null;
+  let fsBarEl = null;
+  let fsArtEl = null;
+  let fsTitleEl = null;
+  let fsArtistEl = null;
+  let fsAlbumEl = null;
+  let fsPlayEl = null;
+  let fsFillEl = null;
+  let fsCurEl = null;
+  let fsDurEl = null;
+  let fsPaused = null;
   let toastTimer = null;
   let jumpRaf = false;
   let fullscreen = false;
@@ -52,6 +65,7 @@
   const fetchRetries = new Map(); // key -> count
   const retryAfter = new Map(); // key -> timestamp
   const offsets = new Map(); // key -> seconds
+  const prefs = { fill: false, autoOpen: true };
   const autoOpened = new Set();
   const userNavigated = new Set();
   let storageMiss = new Set(); // keys known absent in storage
@@ -84,6 +98,35 @@
   function parseTime(s) {
     const p = s.split(':').map(Number);
     return p.some(isNaN) ? 0 : p.reduce((a, b) => a * 60 + b, 0);
+  }
+
+  function fmtTime(sec) {
+    if (!isFinite(sec) || sec < 0) sec = 0;
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = Math.floor(sec % 60);
+    return h ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${m}:${String(s).padStart(2, '0')}`;
+  }
+
+  function artworkUrl() {
+    const md = navigator.mediaSession && navigator.mediaSession.metadata;
+    let url = md && md.artwork && md.artwork.length ? md.artwork[md.artwork.length - 1].src : '';
+    if (!url) {
+      const thumb = document.querySelector('ytmusic-player-bar img');
+      url = thumb ? thumb.src : '';
+    }
+    return url.replace(/=w\d+-h\d+/, '=w600-h600');
+  }
+
+  function clickYtmButton(candidates) {
+    for (const s of candidates) {
+      const b = document.querySelector(s);
+      if (b) {
+        b.click();
+        return true;
+      }
+    }
+    return false;
   }
 
   function getTrack() {
@@ -193,14 +236,17 @@
     fullscreen = false;
     document.body.classList.remove('ytml-fs', 'ytml-idlecur');
     clearTimeout(cursorTimer);
+    fsPaused = null;
     if (panel && panel.isConnected && root) {
       panel.appendChild(root);
       placeControls();
+      if (fsWrap) fsWrap.remove();
       if (lyrics && lyrics.synced && activeIdx >= 0) {
         requestAnimationFrame(() => scrollToActive(activeIdx, 'auto'));
       }
-    } else if (root && root.isConnected) {
-      root.remove();
+    } else {
+      if (fsWrap) fsWrap.remove();
+      if (root && root.isConnected) root.remove();
     }
   }
 
@@ -408,6 +454,9 @@
     if (offsetsLoaded) return;
     offsetsLoaded = true;
     try {
+      await chrome.storage.local.remove('ytmlCache'); // v1 cache: unverified matches
+    } catch { /* storage unavailable */ }
+    try {
       const obj = (await chrome.storage.local.get(STORE_OFFSETS))[STORE_OFFSETS];
       if (obj && typeof obj === 'object') {
         for (const [k, v] of Object.entries(obj)) {
@@ -435,6 +484,30 @@
       } catch { /* storage unavailable */ }
     }, 400);
   }
+
+  let prefsLoaded = false;
+  async function loadPrefs() {
+    if (prefsLoaded) return;
+    prefsLoaded = true;
+    try {
+      const obj = (await chrome.storage.local.get(STORE_PREFS))[STORE_PREFS];
+      if (obj && typeof obj === 'object') Object.assign(prefs, obj);
+    } catch { /* storage unavailable */ }
+    applyPrefFill();
+  }
+
+  function applyPrefFill() {
+    document.documentElement.classList.toggle('ytml-nofill', !prefs.fill);
+  }
+
+  try {
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === 'local' && changes[STORE_PREFS]) {
+        Object.assign(prefs, changes[STORE_PREFS].newValue || {});
+        applyPrefFill();
+      }
+    });
+  } catch { /* api unavailable */ }
 
   async function storedLyrics(key) {
     if (storageMiss.has(key)) return undefined;
@@ -586,7 +659,7 @@
   }
 
   function maybeAutoOpen(key) {
-    if (!AUTOOPEN_ONCE || autoOpened.has(key) || userNavigated.has(key)) return;
+    if (!prefs.autoOpen || !AUTOOPEN_ONCE || autoOpened.has(key) || userNavigated.has(key)) return;
     const h = findLyricsHeader();
     if (!h || isHeaderSelected(h)) return;
     autoOpened.add(key);
@@ -648,10 +721,7 @@
 
   function applyTint() {
     if (!root) return;
-    const md = navigator.mediaSession && navigator.mediaSession.metadata;
-    const art = md && md.artwork && md.artwork.length ? md.artwork[md.artwork.length - 1].src : '';
-    const thumb = document.querySelector('ytmusic-player-bar img');
-    const url = art || (thumb ? thumb.src : '');
+    const url = artworkUrl().replace(/=w600-h600/, '=w64-h64');
     if (!url) {
       root.style.removeProperty('--ytml-tint');
       return;
@@ -672,12 +742,9 @@
           g += d[i + 1];
           b += d[i + 2];
         }
-        if (root && root.isConnected) {
-          root.style.setProperty(
-            '--ytml-tint',
-            `rgba(${(r / n) | 0}, ${(g / n) | 0}, ${(b / n) | 0}, 0.22)`
-          );
-        }
+        const rgb = `${(r / n) | 0}, ${(g / n) | 0}, ${(b / n) | 0}`;
+        if (root && root.isConnected) root.style.setProperty('--ytml-tint', `rgba(${rgb}, 0.22)`);
+        if (fsWrap) fsWrap.style.setProperty('--ytml-tint', `rgba(${rgb}, 0.5)`);
       } catch { /* canvas tainted by CORS; default tint stays */ }
     };
     img.src = url;
@@ -739,6 +806,7 @@
       appliedKey = null;
       currentOffset = offsetFor(track.key);
       updateSyncChip();
+      if (fullscreen) updateFsMeta();
       if (cached === undefined) renderStatus('Loading lyrics…');
     }
 
@@ -807,26 +875,33 @@
 
   function tick() {
     try {
-      if (root && root.isConnected && lyrics && lyrics.synced && !document.hidden) {
-        const v = getVideo();
-        if (v) {
-          const t = v.currentTime - currentOffset;
-          const idx = binarySearch(lyrics.lines, t);
-          if (idx !== activeIdx) {
-            setActive(idx);
-            if (Date.now() >= suppressUntil) scrollToActive(idx);
-            updateJumpButton();
-          }
-          const el = idx >= 0 ? lineEls[idx] : null;
-          if (el) {
-            if (el.dataset.words) {
-              paintWords(el, t);
-            } else {
-              const cur = lyrics.lines[idx];
-              const nxt = lyrics.lines[idx + 1];
-              const end = nxt ? nxt.time : cur.time + 4;
-              paintProgress(el, Math.min(1, Math.max(0, (t - cur.time) / Math.max(end - cur.time, 0.5))));
-            }
+      const v = getVideo();
+      if (fullscreen && v && fsFillEl) {
+        fsFillEl.style.transform = `scaleX(${v.duration ? v.currentTime / v.duration : 0})`;
+        fsCurEl.textContent = fmtTime(v.currentTime);
+        fsDurEl.textContent = fmtTime(v.duration);
+        if (v.paused !== fsPaused) {
+          fsPaused = v.paused;
+          fsPlayEl.innerHTML = v.paused ? SVG_PLAY : SVG_PAUSE;
+        }
+      }
+      if (root && root.isConnected && lyrics && lyrics.synced && !document.hidden && v) {
+        const t = v.currentTime - currentOffset;
+        const idx = binarySearch(lyrics.lines, t);
+        if (idx !== activeIdx) {
+          setActive(idx);
+          if (Date.now() >= suppressUntil) scrollToActive(idx);
+          updateJumpButton();
+        }
+        const el = idx >= 0 ? lineEls[idx] : null;
+        if (el && prefs.fill) {
+          if (el.dataset.words) {
+            paintWords(el, t);
+          } else {
+            const cur = lyrics.lines[idx];
+            const nxt = lyrics.lines[idx + 1];
+            const end = nxt ? nxt.time : cur.time + 4;
+            paintProgress(el, Math.min(1, Math.max(0, (t - cur.time) / Math.max(end - cur.time, 0.5))));
           }
         }
       }
@@ -835,11 +910,117 @@
     }
   }
 
+  const SVG_PLAY = '<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
+  const SVG_PAUSE = '<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>';
+  const SVG_PREV = '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M6 6h2v12H6zM18 6l-8.5 6L18 18z"/></svg>';
+  const SVG_NEXT = '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M16 6h-2v12h2zM6 6l8.5 6L6 18z"/></svg>';
+  const PREV_SELS = ['ytmusic-player-bar .previous-button', '.previous-button'];
+  const NEXT_SELS = ['ytmusic-player-bar .next-button', '.next-button'];
+
+  function buildFsUI() {
+    if (fsWrap) return;
+    fsWrap = document.createElement('div');
+    fsWrap.id = 'ytml-fswrap';
+
+    const side = document.createElement('div');
+    side.id = 'ytml-fs-side';
+    fsArtEl = document.createElement('img');
+    fsArtEl.id = 'ytml-fs-art';
+    fsArtEl.alt = '';
+    fsArtEl.draggable = false;
+    fsTitleEl = document.createElement('div');
+    fsTitleEl.id = 'ytml-fs-title';
+    fsArtistEl = document.createElement('div');
+    fsArtistEl.id = 'ytml-fs-artist';
+    fsAlbumEl = document.createElement('div');
+    fsAlbumEl.id = 'ytml-fs-album';
+    side.append(fsArtEl, fsTitleEl, fsArtistEl, fsAlbumEl);
+
+    fsStage = document.createElement('div');
+    fsStage.id = 'ytml-fs-stage';
+
+    fsBarEl = document.createElement('div');
+    fsBarEl.id = 'ytml-fs-bar';
+
+    const mkBtn = (label, svg, cb) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'ytml-fs-cbtn';
+      b.innerHTML = svg;
+      b.setAttribute('aria-label', label);
+      b.addEventListener('click', cb);
+      return b;
+    };
+    const prev = mkBtn('Previous track', SVG_PREV, () => clickYtmButton(PREV_SELS));
+    fsPlayEl = mkBtn('Play / pause', SVG_PAUSE, () => {
+      const v = getVideo();
+      if (v) v.paused ? v.play() : v.pause();
+    });
+    fsPlayEl.id = 'ytml-fs-play';
+    const next = mkBtn('Next track', SVG_NEXT, () => clickYtmButton(NEXT_SELS));
+
+    fsCurEl = document.createElement('span');
+    fsCurEl.className = 'ytml-fs-time';
+    fsCurEl.textContent = '0:00';
+    fsDurEl = document.createElement('span');
+    fsDurEl.className = 'ytml-fs-time';
+    fsDurEl.textContent = '0:00';
+
+    const trackBox = document.createElement('div');
+    trackBox.className = 'ytml-fs-trackbox';
+    trackBox.setAttribute('role', 'slider');
+    trackBox.setAttribute('aria-label', 'Seek');
+    const rail = document.createElement('div');
+    rail.className = 'ytml-fs-rail';
+    fsFillEl = document.createElement('div');
+    fsFillEl.id = 'ytml-fs-fill';
+    rail.appendChild(fsFillEl);
+    trackBox.appendChild(rail);
+
+    const seekFromEvent = e => {
+      const v = getVideo();
+      if (!v || !isFinite(v.duration) || !v.duration) return;
+      const r = rail.getBoundingClientRect();
+      const frac = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+      v.currentTime = frac * v.duration;
+    };
+    trackBox.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      trackBox.setPointerCapture(e.pointerId);
+      seekFromEvent(e);
+      const move = ev => seekFromEvent(ev);
+      trackBox.addEventListener('pointermove', move);
+      trackBox.addEventListener('pointerup', () => trackBox.removeEventListener('pointermove', move), { once: true });
+      trackBox.addEventListener('pointercancel', () => trackBox.removeEventListener('pointermove', move), { once: true });
+    });
+
+    fsBarEl.append(prev, fsPlayEl, next, fsCurEl, trackBox, fsDurEl);
+    fsStage.appendChild(fsBarEl);
+    fsWrap.append(side, fsStage);
+  }
+
+  function updateFsMeta() {
+    if (!fsWrap) return;
+    const t = getTrack();
+    if (!t) return;
+    fsTitleEl.textContent = t.title;
+    fsArtistEl.textContent = t.artist;
+    const byline = firstSel(SEL.byline);
+    const parts = byline ? byline.textContent.split('•').map(s => s.trim()).filter(Boolean) : [];
+    fsAlbumEl.textContent = parts.slice(1).join(' · ');
+    const url = artworkUrl();
+    if (url && fsArtEl.getAttribute('src') !== url) fsArtEl.src = url;
+    applyTint();
+  }
+
   function enterFullscreen() {
     if (!root || !lyrics || !lyrics.lines || !lyrics.lines.length) return;
     fullscreen = true;
+    buildFsUI();
+    fsStage.insertBefore(root, fsBarEl);
+    document.body.appendChild(fsWrap);
     document.body.classList.add('ytml-fs');
-    document.body.appendChild(root);
+    updateFsMeta();
     placeControls();
     wakeCursor();
     if (lyrics.synced && activeIdx >= 0) {
@@ -940,6 +1121,7 @@
   });
 
   loadOffsets();
+  loadPrefs();
   poll = setInterval(update, POLL_MS);
   requestAnimationFrame(tick);
   update();

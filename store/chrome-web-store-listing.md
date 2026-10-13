@@ -13,12 +13,12 @@
 
 Follow along with lyrics while you listen on YouTube Music — karaoke-style.
 
-YTM Lyrics+ adds a focused, zero-configuration lyrics view to the YouTube Music player. When word-timed lyrics are available, each word lights up as it's sung; otherwise the current line fills smoothly and stays centered as the song plays. Lyrics open automatically for songs that have them — no setup, no options to learn.
+YTM Lyrics+ adds a focused, zero-configuration lyrics view to the YouTube Music player. Lyrics open automatically for songs that have them — no setup required. Want the Apple Music-style karaoke fill that sweeps the active line word by word? Turn it on in the extension popup; off by default.
 
 **Features**
 
-- Word-by-word karaoke highlighting for supported songs.
-- Line-level synced lyrics with smooth progressive fill.
+- Word-by-word karaoke highlighting for supported songs (optional — enable in the popup).
+- Line-level synced lyrics; optional progressive fill on the active line.
 - Click a lyric line to seek to its timestamp.
 - Right-click a line to re-sync lyrics that are slightly off — the offset is remembered per song.
 - Fullscreen lyrics mode with an auto-hiding cursor.
@@ -29,7 +29,7 @@ YTM Lyrics+ adds a focused, zero-configuration lyrics view to the YouTube Music 
 
 Open a track in YouTube Music — lyrics appear on their own. YTM Lyrics+ works only on `music.youtube.com` and does not require a separate account.
 
-**Privacy:** To find lyrics, the extension sends the current track title and artist to LRCLIB and lrc.cx. It also sends the album name and duration when available. Playback position stays in your browser. Lyrics and sync offsets are cached locally on your device. The extension does not sell this information, use it for ads, or store it on its own server. Read the full privacy policy at the URL provided in the Store listing.
+**Privacy:** To find lyrics, the extension sends the current track title and artist to LRCLIB and lrc.cx. It also sends the album name and duration when available. Playback position stays in your browser. Lyrics, sync offsets, and popup preferences are stored locally on your device. The extension does not sell this information, use it for ads, or store it on its own server. Read the full privacy policy at the URL provided in the Store listing.
 
 ## Store privacy disclosure notes
 

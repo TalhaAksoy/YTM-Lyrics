@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>YTM Lyrics+</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 300px;
+      padding: 18px 18px 14px;
+      background: #121214;
+      color: #f5f3f7;
+      font: 500 13px Roboto, "Segoe UI", Arial, sans-serif;
+      color-scheme: dark;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    .brand img { width: 26px; height: 26px; }
+    .brand b { font-size: 15px; letter-spacing: -0.01em; }
+    .brand span {
+      margin-left: auto;
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.35);
+    }
+    label.opt {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 11px 10px;
+      margin: 0 -10px;
+      border-radius: 10px;
+      cursor: pointer;
+    }
+    label.opt:hover { background: rgba(255, 255, 255, 0.06); }
+    label.opt .txt { flex: 1; min-width: 0; }
+    label.opt .name { display: block; color: #fff; }
+    label.opt .desc {
+      display: block;
+      margin-top: 2px;
+      font-size: 11.5px;
+      color: rgba(255, 255, 255, 0.45);
+      line-height: 1.35;
+    }
+    .sw {
+      position: relative;
+      flex-shrink: 0;
+      width: 36px;
+      height: 20px;
+    }
+    .sw input {
+      position: absolute;
+      opacity: 0;
+      inset: 0;
+      cursor: pointer;
+    }
+    .sw i {
+      position: absolute;
+      inset: 0;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.18);
+      transition: background 0.18s ease;
+      pointer-events: none;
+    }
+    .sw i::after {
+      content: "";
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #fff;
+      transition: transform 0.18s ease;
+    }
+    .sw input:checked + i { background: #ff5475; }
+    .sw input:checked + i::after { transform: translateX(16px); }
+    .sw input:focus-visible + i { outline: 2px solid #ff8da2; outline-offset: 2px; }
+    .foot {
+      margin-top: 14px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.35);
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="brand">
+    <img src="icons/ytm-lyrics-48.png" alt="">
+    <b>YTM Lyrics+</b>
+    <span id="ver"></span>
+  </div>
+
+  <label class="opt">
+    <span class="txt">
+      <span class="name">Karaoke fill</span>
+      <span class="desc">Apple Music-style sweep that fills the active line word by word</span>
+    </span>
+    <span class="sw"><input id="fill" type="checkbox"><i></i></span>
+  </label>
+
+  <label class="opt">
+    <span class="txt">
+      <span class="name">Auto-open lyrics tab</span>
+      <span class="desc">Switch to the Lyrics view when synced lyrics are found for a song</span>
+    </span>
+    <span class="sw"><input id="autoOpen" type="checkbox"><i></i></span>
+  </label>
+
+  <div class="foot">Changes apply instantly on open YouTube Music tabs.</div>
+  <script src="popup.js"></script>
+</body>
+</html>

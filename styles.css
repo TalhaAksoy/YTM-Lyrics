@@ -105,6 +105,13 @@ ytmusic-tab-renderer.ytml-plus-host > *:not(#ytml-plus-root):not(#ytml-plus-jump
   text-shadow: 0 0 18px rgba(255, 255, 255, 0.22);
 }
 
+/* Karaoke fill disabled (popup setting) — active line is solid white */
+html.ytml-nofill #ytml-plus-root .ytml-line.ytml-active:not([data-words]),
+html.ytml-nofill #ytml-plus-root .ytml-line.ytml-active .ytml-w {
+  color: #fff;
+  background-image: none;
+}
+
 #ytml-plus-root .ytml-line.ytml-bg {
   font-size: 0.72em;
   padding: 0.28em 0;
@@ -310,17 +317,180 @@ body.ytml-fs {
   overflow: hidden;
 }
 
-body.ytml-fs #ytml-plus-root {
+#ytml-fswrap {
   position: fixed;
   inset: 0;
   z-index: 2147483000;
-  height: auto !important;
-  padding: 10vh 13vw;
+  display: flex;
   background-color: #050505;
+  background-image:
+    linear-gradient(115deg, var(--ytml-tint, rgba(255, 255, 255, 0.07)) 0%, rgba(0, 0, 0, 0) 52%),
+    radial-gradient(120% 60% at 100% 100%, rgba(255, 255, 255, 0.04), rgba(0, 0, 0, 0) 60%);
+  font-family: Roboto, "Segoe UI", Arial, sans-serif;
+}
+
+#ytml-fs-side {
+  width: clamp(260px, 24vw, 360px);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 16px;
+  padding: 0 2vw 0 4.5vw;
+  min-width: 0;
+}
+
+#ytml-fs-art {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 20px;
+  user-select: none;
+  box-shadow:
+    0 24px 70px rgba(0, 0, 0, 0.75),
+    0 0 110px -10px var(--ytml-tint, rgba(255, 255, 255, 0.18));
+}
+
+#ytml-fs-title {
+  font-size: clamp(20px, 2vw, 30px);
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  color: #fff;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+#ytml-fs-artist {
+  font-size: clamp(14px, 1.2vw, 19px);
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.7);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#ytml-fs-album {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.35);
+}
+
+#ytml-fs-stage {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+body.ytml-fs #ytml-plus-root {
+  position: relative;
+  flex: 1;
+  height: auto !important;
+  padding: 7vh 7vw 3vh 4vw;
+  background: none;
 }
 
 body.ytml-fs #ytml-plus-root .ytml-line {
-  font-size: clamp(26px, 3.6vw, 46px);
+  font-size: clamp(24px, 3.2vw, 42px);
+}
+
+#ytml-fs-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 7vw 30px 4vw;
+  transition: opacity 0.3s ease;
+}
+
+.ytml-fs-cbtn {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.85);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.ytml-fs-cbtn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+#ytml-fs-play {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+
+#ytml-fs-play:hover {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.ytml-fs-time {
+  flex-shrink: 0;
+  min-width: 42px;
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.55);
+  text-align: center;
+}
+
+.ytml-fs-trackbox {
+  flex: 1;
+  padding: 12px 6px;
+  cursor: pointer;
+}
+
+.ytml-fs-rail {
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.16);
+  overflow: hidden;
+  transition: height 0.15s ease;
+}
+
+.ytml-fs-trackbox:hover .ytml-fs-rail {
+  height: 6px;
+}
+
+#ytml-fs-fill {
+  height: 100%;
+  width: 100%;
+  background: #fff;
+  border-radius: 2px;
+  transform-origin: left;
+  transform: scaleX(0);
+  will-change: transform;
+}
+
+body.ytml-fs.ytml-idlecur #ytml-fs-bar {
+  opacity: 0;
+  pointer-events: none;
+}
+
+@media (max-width: 880px) {
+  #ytml-fs-side {
+    display: none;
+  }
+
+  body.ytml-fs #ytml-plus-root {
+    padding-left: 8vw;
+  }
+
+  #ytml-fs-bar {
+    padding-left: 8vw;
+  }
 }
 
 body.ytml-fs #ytml-plus-jump,

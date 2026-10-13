@@ -2,16 +2,20 @@
 
 Karaoke-style synchronized lyrics for YouTube Music — a zero-config Chrome extension that upgrades the built-in Lyrics tab with word-by-word highlighting, auto-scroll, click-to-seek, fullscreen mode, and an offline-capable lyrics cache.
 
-![YTM Lyrics+](store/screenshot.png)
+![YTM Lyrics+ — synced lyrics in the player](screenshots/ss-1.png)
+
+*Fullscreen mode — album art with ambient glow, track info, and playback controls. Word-by-word fill in action.*
+
+![YTM Lyrics+ — fullscreen mode](screenshots/ss-2.png)
 
 ## Features
 
-- **Word-by-word karaoke** — when Apple Music TTML data is available (via [lrc.cx](https://lrc.cx)), each word lights up as it's sung. Otherwise timed lines get a smooth progressive fill.
+- **Word-by-word karaoke** — when Apple Music TTML data is available (via [lrc.cx](https://lrc.cx)), each word lights up as it's sung. Opt-in: enable **Karaoke fill** in the extension popup (off by default; the active line just stays highlighted otherwise).
 - **Synced lyrics in the Lyrics tab** — the current line is highlighted and auto-centered while the song plays.
-- **Opens itself** — when synced lyrics are found for a song, the Lyrics tab opens automatically (once per song; if you switch away, it stays away).
+- **Opens itself** — when synced lyrics are found for a song, the Lyrics tab opens automatically (once per song; if you switch away, it stays away — and it can be turned off in the popup).
 - **Click a line to seek** — any timed line jumps playback to its timestamp.
 - **Right-click to re-sync** — if lyrics are slightly off (different intros on YouTube versions), right-click the line that should be playing. The offset is remembered per song.
-- **Fullscreen lyrics** — a floating button expands lyrics into a distraction-free fullscreen view with auto-hiding cursor. `Esc` exits.
+- **Fullscreen lyrics** — a floating button expands into a premium fullscreen view: glowing album art, track info, full playback controls (prev/play/next + seek bar), and an auto-hiding cursor. `Esc` exits.
 - **Works offline** — fetched lyrics and your sync offsets are cached in `chrome.storage`, so previously played songs show lyrics instantly — even with no connection.
 - **Works when YouTube Music has no lyrics** — if the Lyrics tab is disabled for a song, YTM Lyrics+ enables it and pulls lyrics from LRCLIB or lrc.cx instead.
 - **Smart fallbacks** — LRCLIB synced → LRCLIB plain → lrc.cx karaoke (TTML) → lrc.cx synced (LRC) → YouTube Music's own lyrics (restyled) → original UI untouched if nothing is found.
@@ -34,7 +38,8 @@ A Chrome Web Store listing is in progress.
 | File | Role |
 |---|---|
 | `manifest.json` | MV3 manifest — content script on `music.youtube.com`, `storage` permission, host permissions for `lrclib.net` and `api.lrc.cx` |
-| `content.js` | Detects the Lyrics tab, injects the custom UI, tracks playback via `requestAnimationFrame` + binary search, word-level karaoke painting, manual resync, fullscreen, persistent cache |
+| `content.js` | Detects the Lyrics tab, injects the custom UI, tracks playback via `requestAnimationFrame` + binary search, word-level karaoke painting, manual resync, fullscreen, persistent cache, user prefs |
+| `popup.html` / `popup.js` | Toolbar popup — Karaoke fill and Auto-open toggles |
 | `background.js` | Service worker — provider chain (LRCLIB `/api/get` + `/api/search`, then lrc.cx `/jsonapi`), TTML/LRC parsers, request timeouts |
 | `styles.css` | Spotify-style visuals, karaoke fills, fullscreen layout |
 
