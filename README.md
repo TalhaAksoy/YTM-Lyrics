@@ -15,6 +15,7 @@ Karaoke-style synchronized lyrics for YouTube Music **and youtube.com** — a ze
 - **Opens itself** — when synced lyrics are found for a song, the Lyrics tab opens automatically (once per song; if you switch away, it stays away — and it can be turned off in the popup).
 - **Click a line to seek** — any timed line jumps playback to its timestamp.
 - **Right-click to re-sync** — if lyrics are slightly off (different intros on YouTube versions), right-click the line that should be playing. The offset is remembered per song.
+- **Per-song sync toggle** — manually-picked lyrics that don't line up? The `⟳` button renders them as plain static text for that song only (no auto-scroll, no highlighting). Remembered per song.
 - **Auto video↔song timing** — when a music video plays on YouTube Music, YouTube's own segment map shifts lyric timestamps to match (intro/outro/cut differences handled automatically; manual re-sync still available on top).
 - **Internal player bridge** — metadata, seeking, and prev/next go through YouTube Music's own player API (videoId-accurate), not fragile DOM scraping; DOM selectors remain as graceful fallbacks.
 - **Fullscreen lyrics** — a floating button expands into a premium fullscreen view: glowing album art, track info, full playback controls (prev/play/next + seek bar), and an auto-hiding cursor. `Esc` exits.

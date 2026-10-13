@@ -2,8 +2,67 @@ ytmusic-tab-renderer.ytml-plus-host {
   position: relative !important;
 }
 
-ytmusic-tab-renderer.ytml-plus-host > *:not(#ytml-plus-root):not(#ytml-plus-jump):not(#ytml-plus-fs):not(#ytml-plus-sync):not(#ytml-plus-toast) {
+ytmusic-tab-renderer.ytml-plus-host > *:not(#ytml-plus-root):not(#ytml-plus-jump):not(#ytml-plus-fs):not(#ytml-plus-sync):not(#ytml-plus-toast):not(#ytml-plus-find):not(#ytml-plus-pip):not(#ytml-plus-nsync):not(#ytml-find):not(#ytml-bar):not(.ytml-status) {
   display: none !important;
+}
+
+/* Action row pinned to the panel's top padding band — always visible and
+   clickable, and it never covers lyric text (root pads 48px; the bar is
+   ~44px over that empty band). */
+#ytml-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 8px 10px;
+  pointer-events: none;
+}
+
+#ytml-bar > * {
+  pointer-events: auto;
+}
+
+#ytml-bar > button {
+  position: static !important;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(30, 30, 30, 0.9);
+  color: #fff;
+  font: 600 14px Roboto, "Segoe UI", Arial, sans-serif;
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+  opacity: 0.9 !important;
+  transform: none !important;
+  pointer-events: auto !important;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+#ytml-bar > button:hover {
+  opacity: 1 !important;
+  background: rgba(60, 60, 60, 0.95);
+}
+
+#ytml-bar > button:not(.ytml-visible) {
+  display: none;
+}
+
+/* The YT card's close button sits last — rightmost of the action cluster. */
+#ytml-bar > #ytml-ytclose {
+  order: 99;
+}
+
+#ytml-bar > button.ytml-off {
+  opacity: 0.35 !important;
 }
 
 #ytml-plus-root {
@@ -140,6 +199,14 @@ ytmusic-tab-renderer.ytml-plus-host > *:not(#ytml-plus-root):not(#ytml-plus-jump
    scrubber math is computed from the full player width and desyncs if shrunk. */
 #movie_player.ytml-split:not(.ytp-mini) .ytp-chrome-top {
   width: calc((1 - var(--ytml-lyrics-f, 0.2)) * 100%) !important;
+}
+
+/* Same for the full-width top gradient: it is a separate layer sitting over
+   the panel's top strip — shrink it and make it click-transparent so the
+   lyrics bar underneath stays clickable. */
+#movie_player.ytml-split:not(.ytp-mini) .ytp-gradient-top {
+  width: calc((1 - var(--ytml-lyrics-f, 0.2)) * 100%) !important;
+  pointer-events: none !important;
 }
 
 #movie_player.ytp-mini #ytml-ytpanel {
@@ -388,6 +455,163 @@ html.ytml-nofill #ytml-plus-root .ytml-line.ytml-active .ytml-w {
   background: rgba(55, 55, 55, 0.9);
 }
 
+#ytml-plus-find,
+#ytml-plus-pip,
+#ytml-plus-nsync {
+  position: absolute;
+  top: 18px;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(30, 30, 30, 0.85);
+  color: #fff;
+  font: 600 15px Roboto, "Segoe UI", Arial, sans-serif;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  opacity: 0;
+  transform: translateY(-6px);
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease, background 0.2s ease;
+}
+
+#ytml-plus-find { right: 144px; }
+#ytml-plus-pip { right: 102px; }
+#ytml-plus-nsync { right: 60px; }
+
+#ytml-plus-find.ytml-visible,
+#ytml-plus-pip.ytml-visible,
+#ytml-plus-nsync.ytml-visible {
+  opacity: 0.75;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+#ytml-plus-find:hover,
+#ytml-plus-pip:hover,
+#ytml-plus-nsync:hover {
+  opacity: 1;
+  background: rgba(55, 55, 55, 0.9);
+}
+
+#ytml-plus-pip.ytml-on {
+  opacity: 1;
+}
+
+#ytml-plus-nsync.ytml-off {
+  opacity: 0.35;
+}
+
+#ytml-find {
+  position: absolute;
+  top: 60px;
+  right: 18px;
+  z-index: 30;
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+  width: min(320px, calc(100% - 40px));
+  padding: 10px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(14, 14, 20, 0.96);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 14px 44px rgba(0, 0, 0, 0.6);
+}
+
+#ytml-find.ytml-visible {
+  display: flex;
+}
+
+#ytml-find .ytml-find-row {
+  display: flex;
+  gap: 6px;
+}
+
+#ytml-find input {
+  flex: 1;
+  min-width: 0;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  padding: 7px 9px;
+  color: #fff;
+  font: 500 13px Roboto, "Segoe UI", Arial, sans-serif;
+  outline: none;
+}
+
+#ytml-find input:focus {
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+#ytml-find .ytml-find-go,
+#ytml-find .ytml-find-x {
+  flex: none;
+  border: none;
+  border-radius: 8px;
+  padding: 7px 12px;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font: 600 12px Roboto, "Segoe UI", Arial, sans-serif;
+  cursor: pointer;
+}
+
+#ytml-find .ytml-find-x {
+  padding: 7px 10px;
+}
+
+#ytml-find .ytml-find-go:hover,
+#ytml-find .ytml-find-x:hover {
+  background: rgba(255, 255, 255, 0.24);
+}
+
+#ytml-find .ytml-find-list {
+  max-height: 240px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+#ytml-find .ytml-find-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+}
+
+#ytml-find .ytml-find-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+#ytml-find .ytml-find-item-title {
+  color: #fff;
+  font: 600 13px Roboto, "Segoe UI", Arial, sans-serif;
+}
+
+#ytml-find .ytml-find-item-meta {
+  color: rgba(255, 255, 255, 0.45);
+  font: 400 11px Roboto, "Segoe UI", Arial, sans-serif;
+}
+
+#ytml-find .ytml-find-empty {
+  padding: 10px;
+  color: rgba(255, 255, 255, 0.5);
+  font: 400 12px Roboto, "Segoe UI", Arial, sans-serif;
+  text-align: center;
+}
+
 #ytml-plus-sync {
   position: absolute;
   left: 18px;
@@ -623,9 +847,19 @@ body.ytml-fs.ytml-idlecur #ytml-fs-bar {
 
 body.ytml-fs #ytml-plus-jump,
 body.ytml-fs #ytml-plus-fs,
+body.ytml-fs #ytml-plus-find,
+body.ytml-fs #ytml-plus-pip,
+body.ytml-fs #ytml-plus-nsync,
 body.ytml-fs #ytml-plus-sync,
 body.ytml-fs #ytml-plus-toast {
   position: fixed;
+  z-index: 2147483001;
+}
+
+body.ytml-fs #ytml-find {
+  position: fixed;
+  top: 84px;
+  right: 24px;
   z-index: 2147483001;
 }
 
@@ -636,6 +870,9 @@ body.ytml-fs.ytml-idlecur * {
 
 body.ytml-fs.ytml-idlecur #ytml-plus-jump,
 body.ytml-fs.ytml-idlecur #ytml-plus-fs,
+body.ytml-fs.ytml-idlecur #ytml-plus-find,
+body.ytml-fs.ytml-idlecur #ytml-plus-pip,
+body.ytml-fs.ytml-idlecur #ytml-plus-nsync,
 body.ytml-fs.ytml-idlecur #ytml-plus-sync {
   opacity: 0 !important;
   pointer-events: none !important;

@@ -5,11 +5,29 @@ const LRCCX = 'https://api.lrc.cx/jsonapi';
 const FETCH_TIMEOUT_MS = 9000;
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-  if (!msg || msg.type !== 'fetchLyrics') return false;
-  fetchLyrics(msg.track)
-    .then(sendResponse)
-    .catch(() => sendResponse({ ok: false, error: 'internal' }));
-  return true;
+  if (!msg) return false;
+  if (msg.type === 'fetchLyrics') {
+    fetchLyrics(msg.track)
+      .then(sendResponse)
+      .catch(() => sendResponse({ ok: false, error: 'internal' }));
+    return true;
+  }
+  if (msg.type === 'searchLyrics') {
+    searchLyrics(msg.track || {})
+      .then(sendResponse)
+      .catch(() => sendResponse({ ok: false, items: [] }));
+    return true;
+  }
+  // Content scripts cannot fetch chrome-extension:// URLs (styles.css is not
+  // web-accessible) — the PiP window gets its stylesheet through us instead.
+  if (msg.type === 'pipCss') {
+    fetch(chrome.runtime.getURL('styles.css'))
+      .then(r => r.text())
+      .then(css => sendResponse({ ok: true, css }))
+      .catch(() => sendResponse({ ok: false }));
+    return true;
+  }
+  return false;
 });
 
 // Returns { ok: true, data } on a completed lookup (data may be null =
@@ -104,20 +122,74 @@ async function fromLRCCX(track) {
 
   const list = await fetchJson(`${LRCCX}?${params}`);
   if (!Array.isArray(list) || !list.length) return null;
-  const best = pickBestLrccx(list, track);
-  if (!best) return null;
+  return lrccxToLyrics(pickBestLrccx(list, track));
+}
 
-  if (best.lrc_ttml) {
-    const lines = parseTtml(best.lrc_ttml);
+function lrccxToLyrics(item) {
+  if (!item) return null;
+  if (item.lrc_ttml) {
+    const lines = parseTtml(item.lrc_ttml);
     if (lines.length) {
       return { synced: true, wordSync: lines.some(l => l.words), lines, source: 'lrccx' };
     }
   }
-  if (best.lrc) {
-    const lines = parseLrc(best.lrc);
+  if (item.lrc) {
+    const lines = parseLrc(item.lrc);
     if (lines.length) return { synced: true, lines, source: 'lrccx' };
   }
   return null;
+}
+
+// Manual override search — user-pickable candidates, each carrying a
+// ready-to-apply lyrics result. Fixes missed/wrong matches without settings.
+async function searchLyrics(track) {
+  const items = [];
+  const rank = { karaoke: 0, synced: 1, plain: 2 };
+  try {
+    const q = track.title
+      ? new URLSearchParams({ track_name: track.title, artist_name: track.artist || '' })
+      : new URLSearchParams({ q: track.artist || '' });
+    const list = await fetchJson(`${LRCLIB}/search?${q}`);
+    if (Array.isArray(list)) {
+      for (const item of list) {
+        if (!item || (!item.syncedLyrics && !item.plainLyrics)) continue;
+        const res = lrclibToLyrics(item);
+        if (!res) continue;
+        items.push({
+          title: item.trackName || '',
+          artist: item.artistName || '',
+          album: item.albumName || '',
+          duration: typeof item.duration === 'number' ? item.duration : 0,
+          kind: item.syncedLyrics ? 'synced' : 'plain',
+          source: 'LRCLIB',
+          res,
+        });
+      }
+    }
+  } catch { /* provider down */ }
+  try {
+    const q = new URLSearchParams({ title: track.title || '' });
+    if (track.artist) q.set('artist', track.artist);
+    const list = await fetchJson(`${LRCCX}?${q}`);
+    if (Array.isArray(list)) {
+      for (const item of list) {
+        if (!item || (!item.lrc_ttml && !item.lrc)) continue;
+        const res = lrccxToLyrics(item);
+        if (!res) continue;
+        items.push({
+          title: item.title || '',
+          artist: item.artist || '',
+          album: item.album || '',
+          duration: typeof item.duration === 'number' ? item.duration : 0,
+          kind: res.wordSync ? 'karaoke' : 'synced',
+          source: 'lrc.cx',
+          res,
+        });
+      }
+    }
+  } catch { /* provider down */ }
+  items.sort((a, b) => (rank[a.kind] || 3) - (rank[b.kind] || 3));
+  return { ok: true, items: items.slice(0, 8) };
 }
 
 function pickBestLrccx(list, track) {

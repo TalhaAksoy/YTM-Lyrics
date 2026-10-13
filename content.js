@@ -10,6 +10,7 @@
 
   const STORE_LYRICS = 'ytmlCacheV3'; // {key: {data, ts}} — bumped: pre-v1.2 titles kept noise like "prod. X"
   const STORE_OFFSETS = 'ytmlOffsets'; // {key: seconds}
+  const STORE_NOSYNC = 'ytmlNosync'; // {key: true} — per-song "show lyrics statically"
   const STORE_PREFS = 'ytmlPrefs'; // {fill, autoOpen, yt}
   const STORE_CAP = 250;
   const TTL_LYRICS = 30 * 24 * 3600e3;
@@ -68,6 +69,21 @@
   let ytProbeKey = null; // last track.key we asked the sniffer to probe for segMap
   let wantLineAnim = false; // arm the line-stagger animation only per track
   let animTimer = null;
+  let barEl = null; // header row hosting find/pip/fullscreen (+ YT close)
+  let ytCloseBtn = null; // youtube.com card's × button
+  let searchBtn = null; // manual lyrics search toggle
+  let findEl = null; // search overlay
+  let findTitle = null;
+  let findArtist = null;
+  let findList = null;
+  let pipBtn = null;
+  let nsyncBtn = null; // per-song sync on/off toggle
+  let pipWin = null; // Document-PiP window while lyrics float
+  let pipPh = null; // placeholder shown in the panel while PiP is open
+  let pipCss = null; // cached styles.css text for the PiP document
+  let curTitle = '';
+  let curArtist = '';
+  let curDur = 0;
   let toastTimer = null;
   let jumpRaf = false;
   let fullscreen = false;
@@ -77,6 +93,7 @@
   const fetchRetries = new Map(); // key -> count
   const retryAfter = new Map(); // key -> timestamp
   const offsets = new Map(); // key -> seconds
+  const nosync = new Set(); // track.key set — synced lyrics rendered as static text
   const prefs = { fill: false, autoOpen: true, yt: true };
   let playerSnap = null; // latest MAIN-world player snapshot (videoId/title/artist/duration)
   let currentMeta = null; // sniffed Innertube metadata for the playing videoId
@@ -470,20 +487,21 @@
       });
       ytPanelEl.appendChild(grip);
 
-      const close = document.createElement('button');
-      close.id = 'ytml-ytclose';
-      close.type = 'button';
-      close.textContent = '×';
-      close.title = 'Hide lyrics for this video';
-      close.setAttribute('aria-label', 'Hide lyrics for this video');
-      close.addEventListener('click', () => {
+      ytCloseBtn = document.createElement('button');
+      ytCloseBtn.id = 'ytml-ytclose';
+      ytCloseBtn.type = 'button';
+      ytCloseBtn.innerHTML = ICON_CLOSE;
+      ytCloseBtn.title = 'Hide lyrics for this video';
+      ytCloseBtn.setAttribute('aria-label', 'Hide lyrics for this video');
+      ytCloseBtn.classList.add('ytml-visible');
+      ytCloseBtn.addEventListener('click', () => {
         if (trackKey) {
           ytDismissed.add(trackKey);
           ytForced.delete(trackKey);
         }
         teardown();
       });
-      ytPanelEl.appendChild(close);
+      ytPanelEl.appendChild(ytCloseBtn);
     }
     if (ytPanelEl.parentNode !== mp) {
       mp.appendChild(ytPanelEl);
@@ -559,7 +577,7 @@
     fsPaused = null;
     if (panel && panel.isConnected && root) {
       root.classList.remove('ytml-anim');
-      panel.appendChild(root);
+      (pipWin && pipWin.document ? pipWin.document.body : panel).appendChild(root);
       placeControls();
       if (fsWrap) fsWrap.remove();
       if (lyrics && lyrics.synced && activeIdx >= 0) {
@@ -573,9 +591,19 @@
 
   function teardown() {
     exitFullscreen();
+    if (pipWin) {
+      try { pipWin.close(); } catch { /* noop */ }
+      pipWin = null;
+    }
+    hidePipPlaceholder();
     if (root && root.isConnected) root.remove();
+    if (barEl && barEl.isConnected) barEl.remove();
     if (jumpBtn && jumpBtn.isConnected) jumpBtn.remove();
     if (fsBtn && fsBtn.isConnected) fsBtn.remove();
+    if (searchBtn && searchBtn.isConnected) searchBtn.remove();
+    if (pipBtn && pipBtn.isConnected) pipBtn.remove();
+    if (nsyncBtn && nsyncBtn.isConnected) nsyncBtn.remove();
+    if (findEl && findEl.isConnected) findEl.remove();
     if (syncChip && syncChip.isConnected) syncChip.remove();
     if (toastEl && toastEl.isConnected) toastEl.remove();
     if (ytPanelEl && ytPanelEl.isConnected) ytPanelEl.remove();
@@ -609,7 +637,14 @@
     root.tabIndex = 0;
     root.setAttribute('role', 'region');
     root.setAttribute('aria-label', 'Lyrics');
-    panel.appendChild(root);
+    ensureBar();
+    if (pipWin && pipWin.document) {
+      // lyrics float in PiP — keep them there across re-attach cycles
+      pipWin.document.body.appendChild(root);
+      showPipPlaceholder();
+    } else {
+      panel.appendChild(root);
+    }
     ensureControls();
     const vh = window.innerHeight;
     const h = panel === ytPanelEl
@@ -624,16 +659,44 @@
   function ensureControls() {
     const parent = controlsParent();
     if (!parent) return;
+    ensureBar();
     ensureJumpButton();
     ensureFsButton();
+    ensureFindButton();
+    ensurePipButton();
+    ensureNsyncButton();
     ensureSyncChip();
     ensureToast();
+  }
+
+  // Header row inside the panel: action buttons live in normal flow — no
+  // overlay hit-testing games, and lyrics never sit under them. In
+  // fullscreen they move to document.body and take the fixed-position rules.
+  function ensureBar() {
+    if (!barEl) {
+      barEl = document.createElement('div');
+      barEl.id = 'ytml-bar';
+      barEl.setAttribute('role', 'toolbar');
+      barEl.setAttribute('aria-label', 'Lyrics actions');
+    }
+    if (panel && barEl.parentNode !== panel) panel.insertBefore(barEl, panel.firstChild);
+    if (ytCloseBtn && barEl.parentNode === ytPanelEl && ytCloseBtn.parentNode !== barEl) {
+      barEl.appendChild(ytCloseBtn);
+    }
+  }
+
+  function barParent() {
+    return fullscreen ? document.body : barEl || controlsParent();
   }
 
   function placeControls() {
     const parent = controlsParent();
     if (!parent) return;
-    for (const el of [jumpBtn, fsBtn, syncChip, toastEl]) {
+    const bar = barParent();
+    for (const el of [fsBtn, searchBtn, pipBtn, nsyncBtn]) {
+      if (el && bar && el.parentNode !== bar) bar.appendChild(el);
+    }
+    for (const el of [jumpBtn, syncChip, toastEl, findEl]) {
       if (el && el.parentNode !== parent) parent.appendChild(el);
     }
   }
@@ -689,7 +752,7 @@
       jumpBtn.setAttribute('aria-label', 'Scroll back to the current lyric line');
       jumpBtn.addEventListener('click', () => {
         suppressUntil = 0;
-        if (lyrics && lyrics.synced && activeIdx >= 0) scrollToActive(activeIdx);
+        if (lyrics && dispSynced() && activeIdx >= 0) scrollToActive(activeIdx);
       });
     }
     controlsParent().appendChild(jumpBtn);
@@ -698,7 +761,7 @@
 
   function updateJumpButton() {
     if (!jumpBtn) return;
-    const el = root && root.isConnected && lyrics && lyrics.synced && activeIdx >= 0
+    const el = root && root.isConnected && lyrics && dispSynced() && activeIdx >= 0
       ? lineEls[activeIdx]
       : null;
     if (!el) {
@@ -721,12 +784,284 @@
       fsBtn = document.createElement('button');
       fsBtn.id = 'ytml-plus-fs';
       fsBtn.type = 'button';
-      fsBtn.textContent = '⤢';
+      fsBtn.innerHTML = ICON_FS;
       fsBtn.setAttribute('aria-label', 'Toggle fullscreen lyrics');
       fsBtn.title = 'Fullscreen lyrics';
       fsBtn.addEventListener('click', () => (fullscreen ? exitFullscreen() : enterFullscreen()));
     }
-    controlsParent().appendChild(fsBtn);
+    const bar = barParent();
+    if (bar) bar.appendChild(fsBtn);
+  }
+
+  // ---- Manual lyrics search (override) ----
+  // Always visible while a panel is up: it is the fix path for "No lyrics
+  // found" and wrong matches, so it must not be gated on lyrics existing.
+  function ensureFindButton() {
+    if (!searchBtn) {
+      searchBtn = document.createElement('button');
+      searchBtn.id = 'ytml-plus-find';
+      searchBtn.type = 'button';
+      searchBtn.innerHTML = ICON_SEARCH;
+      searchBtn.title = 'Search lyrics manually';
+      searchBtn.setAttribute('aria-label', 'Search lyrics manually');
+      searchBtn.classList.add('ytml-visible');
+      searchBtn.addEventListener('click', toggleFind);
+    }
+    const bar = barParent();
+    if (bar) bar.appendChild(searchBtn);
+  }
+
+  function toggleFind() {
+    if (!findEl) buildFind();
+    if (findEl.classList.contains('ytml-visible')) {
+      closeFind();
+      return;
+    }
+    findTitle.value = curTitle;
+    findArtist.value = curArtist;
+    findList.innerHTML = '';
+    placeControls();
+    findEl.classList.add('ytml-visible');
+    findTitle.focus();
+    findTitle.select();
+  }
+
+  function closeFind() {
+    if (findEl) findEl.classList.remove('ytml-visible');
+  }
+
+  function buildFind() {
+    findEl = document.createElement('div');
+    findEl.id = 'ytml-find';
+    findEl.setAttribute('role', 'dialog');
+    findEl.setAttribute('aria-label', 'Search lyrics');
+    const row = document.createElement('div');
+    row.className = 'ytml-find-row';
+    findTitle = document.createElement('input');
+    findTitle.placeholder = 'Song title';
+    findTitle.setAttribute('aria-label', 'Song title');
+    findArtist = document.createElement('input');
+    findArtist.placeholder = 'Artist';
+    findArtist.setAttribute('aria-label', 'Artist');
+    const go = document.createElement('button');
+    go.type = 'button';
+    go.className = 'ytml-find-go';
+    go.textContent = 'Search';
+    const x = document.createElement('button');
+    x.type = 'button';
+    x.className = 'ytml-find-x';
+    x.textContent = '×';
+    x.setAttribute('aria-label', 'Close search');
+    row.append(findTitle, findArtist, go, x);
+    findList = document.createElement('div');
+    findList.className = 'ytml-find-list';
+    findEl.append(row, findList);
+    go.addEventListener('click', runFind);
+    x.addEventListener('click', closeFind);
+    for (const inp of [findTitle, findArtist]) {
+      inp.addEventListener('keydown', e => {
+        e.stopPropagation();
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          runFind();
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          closeFind();
+        }
+      });
+    }
+    controlsParent().appendChild(findEl);
+  }
+
+  async function runFind() {
+    const title = findTitle.value.trim();
+    const artist = findArtist.value.trim();
+    if (!title && !artist) return;
+    findList.innerHTML = '';
+    const loading = document.createElement('div');
+    loading.className = 'ytml-find-empty';
+    loading.textContent = 'Searching…';
+    findList.appendChild(loading);
+    let res = null;
+    try {
+      res = await chrome.runtime.sendMessage({
+        type: 'searchLyrics',
+        track: { title, artist, duration: curDur },
+      });
+    } catch { /* noop */ }
+    const items = (res && res.items) || [];
+    findList.innerHTML = '';
+    if (!items.length) {
+      const d = document.createElement('div');
+      d.className = 'ytml-find-empty';
+      d.textContent = 'No matches — try different words';
+      findList.appendChild(d);
+      return;
+    }
+    for (const it of items) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'ytml-find-item';
+      const t = document.createElement('span');
+      t.className = 'ytml-find-item-title';
+      t.textContent = `${it.title || '?'} — ${it.artist || '?'}`;
+      const meta = document.createElement('span');
+      meta.className = 'ytml-find-item-meta';
+      const bits = [];
+      if (it.album) bits.push(it.album);
+      if (it.duration) bits.push(fmtTime(it.duration));
+      bits.push(it.kind === 'karaoke' ? 'karaoke' : it.kind === 'synced' ? 'synced' : 'plain');
+      bits.push(it.source);
+      meta.textContent = bits.join(' · ');
+      b.append(t, meta);
+      b.addEventListener('click', () => pickFind(it));
+      findList.appendChild(b);
+    }
+  }
+
+  function pickFind(it) {
+    closeFind();
+    if (!it.res || !trackKey) return;
+    // A manual pick is an authoritative override: cache it like a provider
+    // hit so it survives reloads until the normal cache TTL lapses.
+    cache.set(trackKey, it.res);
+    persistLyrics(trackKey, it.res);
+    appliedKey = trackKey;
+    applyResult(it.res);
+    toast(`Lyrics: ${it.title} — ${it.artist}`);
+  }
+
+  // ---- Bar icons (Material-style SVGs — unicode glyphs were illegible) ----
+  const ICON_FS = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>';
+  const ICON_SEARCH = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M15.5 14h-.79l-.28-.27a6.5 6.5 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z"/></svg>';
+  const ICON_PIP = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M19 11h-8v6h8v-6zm-6 4h4v-2h-4v2zm8-12H3a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h18a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm0 16H3V5h18v14z"/></svg>';
+  const ICON_SYNC = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M12 4V1L8 5l4 4V6a6 6 0 0 1 6 6 6 6 0 0 1-.59 2.66l1.46 1.46A8 8 0 0 0 20 12a8 8 0 0 0-8-8zm0 14a6 6 0 0 1-6-6 6 6 0 0 1 .59-2.66l-1.46-1.46A8 8 0 0 0 4 12a8 8 0 0 0 8 8v3l4-4-4-4v3z"/></svg>';
+  const ICON_CLOSE = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>';
+
+  // ---- Document Picture-in-Picture ----
+  const PIP_CSS =
+    'html,body{height:100%}' +
+    'body.ytml-pip{margin:0;background:#0a0a0d;overflow:hidden}' +
+    'body.ytml-pip #ytml-plus-root{height:100vh!important;max-height:none!important;width:auto!important;padding-top:40px;padding-left:24px;padding-right:24px}' +
+    'body.ytml-pip #ytml-plus-root .ytml-line{font-size:19px}';
+
+  function ensurePipButton() {
+    if (!('documentPictureInPicture' in window)) return;
+    if (!pipBtn) {
+      pipBtn = document.createElement('button');
+      pipBtn.id = 'ytml-plus-pip';
+      pipBtn.type = 'button';
+      pipBtn.innerHTML = ICON_PIP;
+      pipBtn.title = 'Floating lyrics window';
+      pipBtn.setAttribute('aria-label', 'Open lyrics in a floating window');
+      pipBtn.addEventListener('click', togglePip);
+      // Warm the stylesheet cache early: requestWindow() needs transient user
+      // activation, so the click path should not sit behind a message first.
+      if (!pipCss && contextAlive()) {
+        chrome.runtime.sendMessage({ type: 'pipCss' })
+          .then(res => { if (res && res.ok) pipCss = res.css; })
+          .catch(() => { /* noop */ });
+      }
+    }
+    const bar = barParent();
+    if (bar) bar.appendChild(pipBtn);
+  }
+
+  // Per-song "don't follow timings" switch: manually-picked lyrics that don't
+  // match the video are more readable as static text than as a wrong karaoke.
+  function ensureNsyncButton() {
+    if (!nsyncBtn) {
+      nsyncBtn = document.createElement('button');
+      nsyncBtn.id = 'ytml-plus-nsync';
+      nsyncBtn.type = 'button';
+      nsyncBtn.innerHTML = ICON_SYNC;
+      nsyncBtn.title = 'Toggle lyric line sync for this song';
+      nsyncBtn.setAttribute('aria-label', 'Toggle lyric line sync for this song');
+      nsyncBtn.addEventListener('click', toggleNsync);
+    }
+    const bar = barParent();
+    if (bar) bar.appendChild(nsyncBtn);
+    updateNsyncBtn();
+  }
+
+  function updateNsyncBtn() {
+    if (!nsyncBtn) return;
+    nsyncBtn.classList.toggle('ytml-visible', !!(lyrics && lyrics.synced));
+    nsyncBtn.classList.toggle('ytml-off', !!(trackKey && nosync.has(trackKey)));
+  }
+
+  function toggleNsync() {
+    if (!trackKey || !lyrics || !lyrics.synced) return;
+    const off = !nosync.has(trackKey);
+    if (off) nosync.add(trackKey);
+    else nosync.delete(trackKey);
+    persistNosync();
+    const st = root ? root.scrollTop : 0;
+    renderLines();
+    if (root) root.scrollTop = st;
+    updateJumpButton();
+    updateFsVisibility();
+    updateSyncChip();
+    toast(off ? 'Lyrics shown without sync' : 'Line sync back on');
+  }
+
+  async function togglePip() {
+    if (pipWin) {
+      try { pipWin.close(); } catch { /* noop */ }
+      return;
+    }
+    if (!root || !('documentPictureInPicture' in window)) return;
+    if (fullscreen) exitFullscreen();
+    try {
+      if (!pipCss) {
+        const res = await chrome.runtime.sendMessage({ type: 'pipCss' });
+        if (!res || !res.ok) throw new Error('css fetch failed');
+        pipCss = res.css;
+      }
+      const w = await documentPictureInPicture.requestWindow({ width: 360, height: 460 });
+      pipWin = w;
+      const style = w.document.createElement('style');
+      style.textContent = pipCss + '\n' + PIP_CSS;
+      w.document.head.appendChild(style);
+      w.document.body.className = 'ytml-pip';
+      w.document.documentElement.classList.toggle('ytml-nofill', !prefs.fill);
+      w.document.body.appendChild(root);
+      showPipPlaceholder();
+      if (pipBtn) pipBtn.classList.add('ytml-on');
+      w.addEventListener('pagehide', onPipClosed);
+    } catch (e) {
+      pipWin = null;
+      dbg('pip failed', e && e.message);
+    }
+    updateFsVisibility();
+  }
+
+  function onPipClosed() {
+    pipWin = null;
+    hidePipPlaceholder();
+    if (pipBtn) pipBtn.classList.remove('ytml-on');
+    if (root && panel && panel.isConnected && !fullscreen) {
+      panel.appendChild(root);
+      placeControls();
+      if (lyrics && lyrics.synced && activeIdx >= 0) {
+        requestAnimationFrame(() => scrollToActive(activeIdx, 'auto'));
+      }
+    }
+    updateFsVisibility();
+  }
+
+  function showPipPlaceholder() {
+    if (!panel) return;
+    hidePipPlaceholder();
+    pipPh = document.createElement('div');
+    pipPh.className = 'ytml-status';
+    pipPh.textContent = 'Lyrics in Picture-in-Picture — close the floating window to bring them back';
+    panel.appendChild(pipPh);
+  }
+
+  function hidePipPlaceholder() {
+    if (pipPh && pipPh.isConnected) pipPh.remove();
+    pipPh = null;
   }
 
   function ensureSyncChip() {
@@ -763,10 +1098,17 @@
     return offsets.get(key) || 0;
   }
 
+  // Display-effective sync: the provider may say "synced" while the user
+  // disabled line tracking for this song (manually-picked lyrics that don't
+  // line up are better shown as plain readable text).
+  function dispSynced() {
+    return !!(lyrics && lyrics.synced && !(trackKey && nosync.has(trackKey)));
+  }
+
   function updateSyncChip() {
     if (!syncChip) return;
     const o = currentOffset;
-    if (Math.abs(o) < 0.05) {
+    if (Math.abs(o) < 0.05 || (trackKey && nosync.has(trackKey))) {
       syncChip.classList.remove('ytml-visible');
       return;
     }
@@ -799,6 +1141,10 @@
           if (typeof v === 'number') offsets.set(k, v);
         }
       }
+      const ns = (await chrome.storage.local.get(STORE_NOSYNC))[STORE_NOSYNC];
+      if (ns && typeof ns === 'object') {
+        for (const k of Object.keys(ns)) if (ns[k]) nosync.add(k);
+      }
     } catch { /* storage unavailable */ }
     if (trackKey) {
       currentOffset = offsetFor(trackKey);
@@ -821,6 +1167,22 @@
     }, 400);
   }
 
+  let nosyncWriteTimer = null;
+  function persistNosync() {
+    clearTimeout(nosyncWriteTimer);
+    nosyncWriteTimer = setTimeout(async () => {
+      try {
+        const obj = {};
+        for (const k of nosync) obj[k] = true;
+        const keys = Object.keys(obj);
+        if (keys.length > 500) {
+          for (const k of keys.slice(0, keys.length - 500)) delete obj[k];
+        }
+        await chrome.storage.local.set({ [STORE_NOSYNC]: obj });
+      } catch { /* storage unavailable */ }
+    }, 400);
+  }
+
   let prefsLoaded = false;
   async function loadPrefs() {
     if (prefsLoaded) return;
@@ -834,6 +1196,9 @@
 
   function applyPrefFill() {
     document.documentElement.classList.toggle('ytml-nofill', !prefs.fill);
+    if (pipWin && pipWin.document) {
+      pipWin.document.documentElement.classList.toggle('ytml-nofill', !prefs.fill);
+    }
   }
 
   try {
@@ -912,15 +1277,16 @@
     root.innerHTML = '';
     lineEls = [];
     activeIdx = -1;
+    const sync = dispSynced();
     lyrics.lines.forEach((line, i) => {
       const el = document.createElement('div');
-      if (!line.text && !lyrics.synced) {
+      if (!line.text && !sync) {
         el.className = 'ytml-gap';
       } else {
-        el.className = 'ytml-line ' + (lyrics.synced ? 'ytml-d3' : 'ytml-static');
+        el.className = 'ytml-line ' + (sync ? 'ytml-d3' : 'ytml-static');
         if (line.bg) el.classList.add('ytml-bg');
         el.style.setProperty('--i', Math.min(i, 30));
-        if (lyrics.synced && line.text) {
+        if (sync && line.text) {
           if (line.words && line.words.length) {
             for (const w of line.words) {
               el.appendChild(wordSpan(w.text, w.time, w.end));
@@ -949,7 +1315,7 @@
         } else {
           el.textContent = line.text || '♪';
         }
-        if (lyrics.synced) {
+        if (sync) {
           el.setAttribute('role', 'button');
           el.tabIndex = 0;
           el.title = 'Seek to this line · right-click to re-sync';
@@ -987,7 +1353,8 @@
     } else {
       credit.textContent = lyrics.attribution || 'Source: YouTube Music';
     }
-    if (lyrics.synced) {
+    if (lyrics.synced && !sync) credit.appendChild(document.createTextNode(' · sync off'));
+    if (sync) {
       credit.appendChild(document.createTextNode(' · right-click a line to re-sync'));
     }
     root.appendChild(credit);
@@ -1052,8 +1419,10 @@
   }
 
   function updateFsVisibility() {
-    if (!fsBtn) return;
-    fsBtn.classList.toggle('ytml-visible', !!(lyrics && lyrics.lines && lyrics.lines.length));
+    const has = !!(lyrics && lyrics.lines && lyrics.lines.length);
+    if (fsBtn) fsBtn.classList.toggle('ytml-visible', has);
+    if (pipBtn) pipBtn.classList.toggle('ytml-visible', has || !!pipWin);
+    updateNsyncBtn();
   }
 
   function nativeFallback() {
@@ -1201,6 +1570,9 @@
       lastResult = null;
       segMapApplied = false;
       wantLineAnim = true;
+      curTitle = track.title || '';
+      curArtist = track.artist || '';
+      curDur = track.duration || 0;
       currentOffset = offsetFor(track.key);
       updateSyncChip();
       if (fullscreen) updateFsMeta();
@@ -1282,7 +1654,7 @@
           fsPlayEl.innerHTML = v.paused ? SVG_PLAY : SVG_PAUSE;
         }
       }
-      if (root && root.isConnected && lyrics && lyrics.synced && !document.hidden && v && !(IS_YT && playerSnap && playerSnap.ad)) {
+      if (root && root.isConnected && lyrics && dispSynced() && !document.hidden && v && !(IS_YT && playerSnap && playerSnap.ad)) {
         const t = v.currentTime - currentOffset;
         const idx = binarySearch(lyrics.lines, t);
         if (idx !== activeIdx) {
@@ -1422,6 +1794,9 @@
 
   function enterFullscreen() {
     if (!root || !lyrics || !lyrics.lines || !lyrics.lines.length) return;
+    if (pipWin) {
+      try { pipWin.close(); } catch { /* noop */ }
+    }
     fullscreen = true;
     buildFsUI();
     root.classList.remove('ytml-anim');
