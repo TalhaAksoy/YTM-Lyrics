@@ -34,22 +34,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 // genuinely not found) or { ok: false, error } on a transient failure that
 // should not be cached as "no lyrics".
 async function fetchLyrics(track) {
-  let sawError = false;
-
-  try {
-    const fromLrclib = await fromLRCLIB(track);
-    if (fromLrclib) return { ok: true, data: fromLrclib };
-  } catch {
-    sawError = true;
-  }
-
-  try {
-    const fromLrccx = await fromLRCCX(track);
-    if (fromLrccx) return { ok: true, data: fromLrccx };
-  } catch {
-    sawError = true;
-  }
-
+  // Providers race in parallel — total wait is the slowest leg, not the sum.
+  // Preference order is unchanged: LRCLIB result wins over lrc.cx when both hit.
+  const [l, x] = await Promise.allSettled([fromLRCLIB(track), fromLRCCX(track)]);
+  if (l.status === 'fulfilled' && l.value) return { ok: true, data: l.value };
+  if (x.status === 'fulfilled' && x.value) return { ok: true, data: x.value };
+  const sawError = l.status === 'rejected' || x.status === 'rejected';
   return sawError ? { ok: false, error: 'fetch-failed' } : { ok: true, data: null };
 }
 

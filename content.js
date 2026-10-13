@@ -147,13 +147,17 @@
       schedule();
     } else if (d.type === 'lyrics' && d.videoId) {
       sniffedLyrics.set(d.videoId, { text: d.text, source: d.source });
-      // Native lyrics can land after providers already missed — upgrade the entry.
-      if (d.text && playerSnap && playerSnap.videoId === d.videoId && trackKey && cache.get(trackKey) === 'none') {
-        const ytm = ytmLyricsResult(d.text, d.source);
-        if (ytm) {
-          cache.set(trackKey, ytm);
-          persistLyrics(trackKey, ytm);
-          appliedKey = null;
+      // Native lyrics can land while providers are still fetching (or after
+      // they missed) — show them now; a provider result upgrades on arrival.
+      if (d.text && playerSnap && playerSnap.videoId === d.videoId && trackKey) {
+        const cur = cache.get(trackKey);
+        if (cur === 'none' || cur === 'pending' || cur === undefined) {
+          const ytm = ytmLyricsResult(d.text, d.source);
+          if (ytm) {
+            cache.set(trackKey, ytm);
+            persistLyrics(trackKey, ytm);
+            appliedKey = null;
+          }
         }
       }
       schedule();
@@ -1491,6 +1495,8 @@
         const val = data || 'none';
         cache.set(track.key, val);
         persistLyrics(track.key, data);
+        // A real result upgrades whatever interim/native lyrics are showing.
+        if (data && appliedKey === track.key) appliedKey = null;
       } else {
         cache.delete(track.key);
         const tries = (fetchRetries.get(track.key) || 0) + 1;
@@ -1543,10 +1549,14 @@
       teardown();
       return;
     }
-    if (IS_YT && ytProbeKey !== track.key) {
+    // Ask the MAIN-world sniffer for a WEB_REMIX /next — the counterpart
+    // segmentMap corrects song-timed lyrics onto a music video's timeline.
+    // On YTM this matters on auto-advance: the queue prefetches the next
+    // track without a /next request, so meta (and segMap) never gets sniffed.
+    const needProbe = track.videoId && ytProbeKey !== track.key &&
+      (IS_YT || !track.meta || (track.meta.isVideo && !(track.meta.segMap && track.meta.segMap.length)));
+    if (needProbe) {
       ytProbeKey = track.key;
-      // Ask the MAIN-world sniffer for YTM's queue data — the counterpart
-      // segmentMap corrects song-timed lyrics onto the music video's timeline.
       try {
         document.dispatchEvent(new CustomEvent('ytml-probe', { detail: { videoId: track.videoId } }));
       } catch { /* noop */ }
