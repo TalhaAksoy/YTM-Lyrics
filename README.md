@@ -15,6 +15,8 @@ Karaoke-style synchronized lyrics for YouTube Music — a zero-config Chrome ext
 - **Opens itself** — when synced lyrics are found for a song, the Lyrics tab opens automatically (once per song; if you switch away, it stays away — and it can be turned off in the popup).
 - **Click a line to seek** — any timed line jumps playback to its timestamp.
 - **Right-click to re-sync** — if lyrics are slightly off (different intros on YouTube versions), right-click the line that should be playing. The offset is remembered per song.
+- **Auto video↔song timing** — when a music video plays, YouTube's own segment map shifts lyric timestamps to match (intro/outro/cut differences handled automatically; manual re-sync still available on top).
+- **Internal player bridge** — metadata, seeking, and prev/next go through YouTube Music's own player API (videoId-accurate), not fragile DOM scraping; DOM selectors remain as graceful fallbacks.
 - **Fullscreen lyrics** — a floating button expands into a premium fullscreen view: glowing album art, track info, full playback controls (prev/play/next + seek bar), and an auto-hiding cursor. `Esc` exits.
 - **Works offline** — fetched lyrics and your sync offsets are cached in `chrome.storage`, so previously played songs show lyrics instantly — even with no connection.
 - **Works when YouTube Music has no lyrics** — if the Lyrics tab is disabled for a song, YTM Lyrics+ enables it and pulls lyrics from LRCLIB or lrc.cx instead.
@@ -39,16 +41,18 @@ A Chrome Web Store listing is in progress.
 |---|---|
 | `manifest.json` | MV3 manifest — content script on `music.youtube.com`, `storage` permission, host permissions for `lrclib.net` and `api.lrc.cx` |
 | `content.js` | Detects the Lyrics tab, injects the custom UI, tracks playback via `requestAnimationFrame` + binary search, word-level karaoke painting, manual resync, fullscreen, persistent cache, user prefs |
+| `player-bridge.js` | MAIN-world bridge — reads YouTube Music's internal `movie_player` API (videoId, title, artist, duration, play state) and executes seek/play/prev/next via `ytml-cmd` events |
+| `sniffer.js` | MAIN-world request observer — watches YouTube Music's own `/next` + `/browse` responses for authoritative track metadata, song↔video counterparts + segment maps, and native lyrics |
 | `popup.html` / `popup.js` | Toolbar popup — Karaoke fill and Auto-open toggles |
 | `background.js` | Service worker — provider chain (LRCLIB `/api/get` + `/api/search`, then lrc.cx `/jsonapi`), TTML/LRC parsers, request timeouts |
 | `styles.css` | Spotify-style visuals, karaoke fills, fullscreen layout |
 
 Lyrics lookup flow:
 
-1. The content script reads the current track's title, artist, and duration from the YouTube Music player bar (DOM-first, so ads can't corrupt it).
-2. The background worker queries LRCLIB for an exact match, falls back to LRCLIB search, then to lrc.cx (Apple Music catalogue data — preferring word-timed TTML entries, scored by title/artist/duration similarity).
+1. The content script identifies the current track from a layered chain: player bar DOM (ad-safe) → sniffed Innertube metadata → Media Session → `movie_player` API — keyed by videoId when the player bridge is live.
+2. The background worker queries LRCLIB for an exact match, falls back to LRCLIB search, then to lrc.cx (Apple Music catalogue data — preferring word-timed TTML entries, scored by title/artist/duration similarity). YouTube Music's own lyrics (sniffed or scraped) are the last resort.
 3. Results are cached in memory and persisted to `chrome.storage.local` (30-day TTL for lyrics, 3-day for misses, ~250-entry LRU), so replayed songs load instantly and work offline.
-4. `video.currentTime` drives the active-line highlight and per-word progress; a per-song offset corrects mismatched timings.
+4. `video.currentTime` drives the active-line highlight and per-word progress; YouTube's song↔video segment map fixes music-video timing automatically, and a per-song manual offset covers the rest.
 
 ## Privacy
 

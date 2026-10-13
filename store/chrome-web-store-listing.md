@@ -21,6 +21,7 @@ YTM Lyrics+ adds a focused, zero-configuration lyrics view to the YouTube Music 
 - Line-level synced lyrics; optional progressive fill on the active line.
 - Click a lyric line to seek to its timestamp.
 - Right-click a line to re-sync lyrics that are slightly off — the offset is remembered per song.
+- Automatic timing correction for music videos (intro/outro differences vs. the song version).
 - Fullscreen lyrics mode with an auto-hiding cursor.
 - Offline-capable: fetched lyrics are cached locally, so replayed songs load instantly.
 - Plain lyrics when timed lyrics are unavailable.
@@ -52,7 +53,7 @@ Fetched lyrics are cached in `chrome.storage.local` so replayed songs load insta
 
 ### Content script match: `https://music.youtube.com/*`
 
-The content script runs only on YouTube Music. It reads the current player’s track metadata, duration, and playback position; detects the Lyrics view; displays and synchronizes lyrics; lets the user click a timed line to seek or right-click a line to set a timing offset; and offers an optional fullscreen lyrics view. The playback position remains local to the page. The script does not run on other websites.
+The content script runs only on YouTube Music. It reads the current player’s track metadata, duration, and playback position (including via YouTube Music’s own in-page player API and lyric responses); detects the Lyrics view; displays and synchronizes lyrics; lets the user click a timed line to seek or right-click a line to set a timing offset; and offers an optional fullscreen lyrics view. The playback position remains local to the page. The script does not run on other websites.
 
 ## Listing image checklist
 

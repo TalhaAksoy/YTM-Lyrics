@@ -10,9 +10,9 @@
 - [ ] **Zip only the extension files** — do NOT include `store/`, `*.md`, or the `.svg`:
   ```bash
   cd youtube-music-lyrics
-  zip -r ../ytm-lyrics-plus.zip manifest.json background.js content.js popup.html popup.js styles.css icons/ytm-lyrics-16.png icons/ytm-lyrics-48.png icons/ytm-lyrics-128.png
+  zip -r ../ytm-lyrics-plus.zip manifest.json background.js content.js sniffer.js player-bridge.js popup.html popup.js styles.css icons/ytm-lyrics-16.png icons/ytm-lyrics-48.png icons/ytm-lyrics-128.png
   ```
-- [ ] **Reload & smoke-test once more** — `chrome://extensions` → reload → YouTube Music → Lyrics tab. Cover: a synced song (line fill + auto-open), a karaoke song (word-by-word via lrc.cx), a song with a disabled lyrics tab, right-click re-sync + `↺ sync` reset, fullscreen (`⤢` + `Esc`), and a reload/replay to confirm the offline cache.
+- [ ] **Reload & smoke-test once more** — `chrome://extensions` → reload → YouTube Music → Lyrics tab. Cover: a synced song (line fill + auto-open), a karaoke song (word-by-word via lrc.cx), a song with a disabled lyrics tab, right-click re-sync + `↺ sync` reset, fullscreen (`⤢` + `Esc` + transport controls), a reload/replay to confirm the offline cache, and a **music video** to verify the segmentMap auto-timing fix (set `window.__ytmlDebug = true` to see `segMap applied` in the console).
 
 ## Store form fields
 

@@ -66,6 +66,12 @@
   const retryAfter = new Map(); // key -> timestamp
   const offsets = new Map(); // key -> seconds
   const prefs = { fill: false, autoOpen: true };
+  let playerSnap = null; // latest MAIN-world player snapshot (videoId/title/artist/duration)
+  let currentMeta = null; // sniffed Innertube metadata for the playing videoId
+  let lastResult = null; // last applied lyrics result (pre-segmap transform)
+  let segMapApplied = false;
+  const sniffedMeta = new Map(); // videoId -> meta (title/artist/album/isVideo/segMap/counterpartId/art)
+  const sniffedLyrics = new Map(); // videoId -> {text, source}
   const autoOpened = new Set();
   const userNavigated = new Set();
   let storageMiss = new Set(); // keys known absent in storage
@@ -75,6 +81,102 @@
       if (window.__ytmlDebug) console.debug('[ytml+]', ...a);
     } catch { /* noop */ }
   };
+
+  // ---- MAIN-world bridges (player-bridge.js + sniffer.js) ----
+  // CustomEvents on `document` cross the MAIN/ISOLATED boundary. Everything
+  // they provide is additive: without them the extension keeps working off
+  // DOM/mediaSession fallbacks.
+
+  document.addEventListener('ytml-player-snapshot', e => {
+    const d = e && e.detail;
+    if (d && d.videoId) playerSnap = d;
+  });
+
+  document.addEventListener('ytml-sniffed', e => {
+    const d = e && e.detail;
+    if (!d) return;
+    if (d.type === 'meta' && d.meta && d.meta.id) {
+      sniffedMeta.set(d.meta.id, d.meta);
+      if (playerSnap && playerSnap.videoId === d.meta.id) {
+        currentMeta = d.meta;
+        // segMap may arrive after lyrics rendered — re-apply with corrected
+        // times, but only if the applied result belongs to the current track.
+        if (appliedKey === trackKey && !segMapApplied && lastResult && lastResult.synced && d.meta.isVideo && d.meta.segMap && d.meta.segMap.length) {
+          applyResult(lastResult);
+        }
+      }
+      schedule();
+    } else if (d.type === 'lyrics' && d.videoId) {
+      sniffedLyrics.set(d.videoId, { text: d.text, source: d.source });
+      // Native lyrics can land after providers already missed — upgrade the entry.
+      if (d.text && playerSnap && playerSnap.videoId === d.videoId && trackKey && cache.get(trackKey) === 'none') {
+        const ytm = ytmLyricsResult(d.text, d.source);
+        if (ytm) {
+          cache.set(trackKey, ytm);
+          persistLyrics(trackKey, ytm);
+          appliedKey = null;
+        }
+      }
+      schedule();
+    }
+  });
+  // Sniffer runs at document_start, before us — ask it to replay its captures.
+  try {
+    document.dispatchEvent(new Event('ytml-sniff-replay'));
+  } catch { /* noop */ }
+
+  function bridgeCmd(op, t) {
+    try {
+      document.dispatchEvent(new CustomEvent('ytml-cmd', { detail: { op, t } }));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function seekTo(t) {
+    if (playerSnap) bridgeCmd('seek', t);
+    else {
+      const v = getVideo();
+      if (v) v.currentTime = t;
+    }
+  }
+
+  // segmentMap maps the counterpart (song) timeline onto the playing video's
+  // timeline: intro/outro/cut differences between a music video and its audio
+  // track. Outside mapped regions we extrapolate the nearest segment's offset.
+  function songToVideo(t, segs) {
+    let best = null;
+    let bestGap = Infinity;
+    for (const s of segs) {
+      if (t >= s.c && t < s.c + s.d) return s.p + (t - s.c);
+      const gap = t < s.c ? s.c - t : t - (s.c + s.d);
+      if (gap < bestGap) {
+        bestGap = gap;
+        best = s;
+      }
+    }
+    return best ? t + (best.p - best.c) : t;
+  }
+
+  function applySegMap(res, segs) {
+    const mapT = t => (typeof t === 'number' ? songToVideo(t, segs) : t);
+    return Object.assign({}, res, {
+      lines: res.lines.map(l => ({
+        ...l,
+        time: mapT(l.time),
+        end: l.end == null ? l.end : mapT(l.end),
+        words: l.words ? l.words.map(w => ({ ...w, time: mapT(w.time), end: w.end == null ? w.end : mapT(w.end) })) : l.words,
+      })),
+    });
+  }
+
+  function ytmLyricsResult(text, source) {
+    if (!text) return null;
+    const lines = text.split('\n').map(s => ({ text: s.trim() })).filter(l => l.text);
+    if (lines.length < 2) return null;
+    return { synced: false, lines, source: 'ytm', attribution: source || 'Source: YouTube Music' };
+  }
 
   function firstSel(list, within = document) {
     for (const s of list) {
@@ -109,8 +211,17 @@
   }
 
   function artworkUrl() {
-    const md = navigator.mediaSession && navigator.mediaSession.metadata;
-    let url = md && md.artwork && md.artwork.length ? md.artwork[md.artwork.length - 1].src : '';
+    // Sniffed counterpart art is the square album cover — for a playing video
+    // it's preferable to the video's own 16:9 frame.
+    let url = '';
+    if (currentMeta) {
+      const cp = currentMeta.isVideo && currentMeta.counterpartId ? sniffedMeta.get(currentMeta.counterpartId) : null;
+      url = (cp && cp.art) || currentMeta.art || '';
+    }
+    if (!url) {
+      const md = navigator.mediaSession && navigator.mediaSession.metadata;
+      url = md && md.artwork && md.artwork.length ? md.artwork[md.artwork.length - 1].src : '';
+    }
     if (!url) {
       const thumb = document.querySelector('ytmusic-player-bar img');
       url = thumb ? thumb.src : '';
@@ -135,12 +246,16 @@
     const byline = firstSel(SEL.byline);
     const domArtist = byline ? byline.textContent.split('•')[0].trim() : '';
     const md = navigator.mediaSession && navigator.mediaSession.metadata;
-    const title = domTitle || (md && md.title) || '';
+    const snap = playerSnap;
+    const meta = snap && snap.videoId ? sniffedMeta.get(snap.videoId) : null;
+
+    // Priority: player bar (ad-safe) > sniffed Innertube meta > mediaSession > player API.
+    const title = domTitle || (meta && meta.title) || (md && md.title) || (snap && snap.title) || '';
     if (!title) return null;
 
-    // During ads mediaSession carries ad metadata; the DOM player bar wins.
-    const artist = domArtist || (md && md.artist) || '';
-    const album = md && md.title === title ? md.album || '' : '';
+    const artist = domArtist || (meta && meta.artist) || (md && md.artist) || (snap && snap.artist) || '';
+    const album = (meta && meta.album) || (md && md.title === title ? md.album || '' : '');
+    const videoId = snap && snap.videoId ? snap.videoId : null;
 
     const timeInfo = firstSel(SEL.timeInfo);
     const spans = timeInfo
@@ -151,9 +266,14 @@
       const v = getVideo();
       dur = v && isFinite(v.duration) ? Math.round(v.duration) : 0;
     }
+    if (!dur && meta && meta.durationMs) dur = Math.round(meta.durationMs / 1000);
+    if (!dur && snap && snap.duration) dur = Math.round(snap.duration);
     if (!dur) return null;
 
-    return { title, artist, album, duration: dur, key: `${title}::${artist}::${dur}` };
+    // videoId keys are stabler than title/artist/duration strings — and correct:
+    // a song's offset/cache lives with the exact version that played.
+    const key = videoId ? `v:${videoId}` : `${title}::${artist}::${dur}`;
+    return { title, artist, album, duration: dur, key, videoId, meta };
   }
 
   function getPage() {
@@ -618,8 +738,7 @@
           el.tabIndex = 0;
           el.title = 'Seek to this line · right-click to re-sync';
           el.addEventListener('click', () => {
-            const v = getVideo();
-            if (v) v.currentTime = line.time + currentOffset + 0.02;
+            seekTo(line.time + currentOffset + 0.02);
             suppressUntil = 0;
           });
           el.addEventListener('keydown', e => {
@@ -682,12 +801,20 @@
       renderStatus('♪ Instrumental');
       return;
     }
+    lastResult = res;
     lyrics = res;
+    // Provider lyrics are timed to the song version; when a music video is
+    // playing, its segmentMap corrects for intro/outro/cut differences.
+    if (res.synced && currentMeta && currentMeta.isVideo && currentMeta.segMap && currentMeta.segMap.length) {
+      lyrics = applySegMap(res, currentMeta.segMap);
+      segMapApplied = true;
+      dbg('segMap applied:', currentMeta.segMap.length, 'segments');
+    }
     renderLines();
     if (res.synced) {
       const v = getVideo();
       if (v) {
-        setActive(binarySearch(res.lines, v.currentTime - currentOffset));
+        setActive(binarySearch(lyrics.lines, v.currentTime - currentOffset));
         scrollToActive(activeIdx, 'auto');
       }
       maybeAutoOpen(trackKey);
@@ -704,6 +831,11 @@
   }
 
   function nativeFallback() {
+    // Prefer lyrics sniffed from YouTube Music's own /browse response.
+    const vid = playerSnap && playerSnap.videoId;
+    const sniffed = vid ? sniffedLyrics.get(vid) : null;
+    if (sniffed && sniffed.text) return ytmLyricsResult(sniffed.text, sniffed.source);
+
     const page = getPage();
     const shelf = page && page.querySelector(SEL.shelf);
     if (!shelf) return null;
@@ -804,6 +936,9 @@
     if (track.key !== trackKey) {
       trackKey = track.key;
       appliedKey = null;
+      currentMeta = track.meta || null;
+      lastResult = null;
+      segMapApplied = false;
       currentOffset = offsetFor(track.key);
       updateSyncChip();
       if (fullscreen) updateFsMeta();
@@ -951,13 +1086,20 @@
       b.addEventListener('click', cb);
       return b;
     };
-    const prev = mkBtn('Previous track', SVG_PREV, () => clickYtmButton(PREV_SELS));
+    const prev = mkBtn('Previous track', SVG_PREV, () => {
+      if (!(playerSnap && bridgeCmd('previous'))) clickYtmButton(PREV_SELS);
+    });
     fsPlayEl = mkBtn('Play / pause', SVG_PAUSE, () => {
-      const v = getVideo();
-      if (v) v.paused ? v.play() : v.pause();
+      if (playerSnap) bridgeCmd('play-pause');
+      else {
+        const v = getVideo();
+        if (v) v.paused ? v.play() : v.pause();
+      }
     });
     fsPlayEl.id = 'ytml-fs-play';
-    const next = mkBtn('Next track', SVG_NEXT, () => clickYtmButton(NEXT_SELS));
+    const next = mkBtn('Next track', SVG_NEXT, () => {
+      if (!(playerSnap && bridgeCmd('next'))) clickYtmButton(NEXT_SELS);
+    });
 
     fsCurEl = document.createElement('span');
     fsCurEl.className = 'ytml-fs-time';
@@ -982,7 +1124,8 @@
       if (!v || !isFinite(v.duration) || !v.duration) return;
       const r = rail.getBoundingClientRect();
       const frac = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
-      v.currentTime = frac * v.duration;
+      if (playerSnap) bridgeCmd('seek', frac * v.duration);
+      else v.currentTime = frac * v.duration;
     };
     trackBox.addEventListener('pointerdown', e => {
       e.preventDefault();
@@ -1007,7 +1150,9 @@
     fsArtistEl.textContent = t.artist;
     const byline = firstSel(SEL.byline);
     const parts = byline ? byline.textContent.split('•').map(s => s.trim()).filter(Boolean) : [];
-    fsAlbumEl.textContent = parts.slice(1).join(' · ');
+    const alb = (currentMeta && currentMeta.album) || '';
+    const rest = parts.slice(1).filter(p => !alb || p !== alb);
+    fsAlbumEl.textContent = [alb, ...rest].filter(Boolean).join(' · ') || parts.slice(1).join(' · ');
     const url = artworkUrl();
     if (url && fsArtEl.getAttribute('src') !== url) fsArtEl.src = url;
     applyTint();

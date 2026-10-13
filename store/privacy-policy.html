@@ -31,7 +31,7 @@
     <p class="summary">YTM Lyrics+ reads the current song details needed to find lyrics. It sends the song title and artist, and when available the album and track duration, to LRCLIB and lrc.cx so they can return matching lyrics. Results are cached locally in your browser so replayed songs load instantly, even offline.</p>
 
     <h2>Information the extension handles</h2>
-    <p>On YouTube Music, the extension checks the current player for the track title, artist, total duration, and playback position. When the lyrics view is available, it may also read the album name. It sends lookups to the lyrics providers only when lyrics are being shown and a locally cached result is not available. Playback position is used locally to highlight the current lyric line and is never transmitted.</p>
+    <p>On YouTube Music, the extension checks the current player for the track title, artist, total duration, and playback position. It also reads YouTube Music’s own API responses inside the page (track metadata and lyric text that YouTube Music already delivers to your browser) — this data is used only locally and is never relayed elsewhere. When the lyrics view is available, it may also read the album name. It sends lookups to the lyrics providers only when lyrics are being shown and a locally cached result is not available. Playback position is used locally to highlight the current lyric line and is never transmitted.</p>
     <p>The extension does not read or collect your name, email address, account credentials, cookies, payment details, contacts, or activity on other websites.</p>
 
     <h2>How information is used and shared</h2>
