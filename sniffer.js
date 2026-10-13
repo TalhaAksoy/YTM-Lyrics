@@ -196,6 +196,106 @@
     }
   }
 
+  // ---- youtube.com: "Music in this video" structured rows ----
+  // Engagement panels carry Song/Artist/Album rows for official music uploads.
+  // We walk the response for infoRowRenderer objects and match known labels.
+  const MUSIC_LABELS = {
+    // ASCII-folded labels (NFD + strip marks, lowercase) so locale variants
+    // like "ŞARKI"→"sarki" and "SANATÇI"→"sanatci" all match.
+    song: new Set(['song', 'sarki', 'cancion', 'chanson', 'lied', 'musica', 'cancao', '曲', '곡']),
+    artist: new Set(['artist', 'sanatci', 'artista', 'artiste', 'kunstler', 'cantante', 'アーティスト', '아티스트']),
+    album: new Set(['album', 'アルバム', '앨범']),
+  };
+  const fold = s => (s || '').toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
+
+  function collectInfoRows(obj, out) {
+    if (!obj || typeof obj !== 'object' || out.length > 24) return;
+    if (obj.infoRowRenderer && obj.infoRowRenderer.title) out.push(obj.infoRowRenderer);
+    for (const k of Object.keys(obj)) {
+      const v = obj[k];
+      if (v && typeof v === 'object') {
+        if (Array.isArray(v)) for (const it of v) collectInfoRows(it, out);
+        else collectInfoRows(v, out);
+      }
+    }
+  }
+
+  function handleWatchNext(reqJson, resJson) {
+    const videoId =
+      (reqJson && reqJson.videoId) ||
+      (resJson && resJson.currentVideoEndpoint && resJson.currentVideoEndpoint.watchEndpoint && resJson.currentVideoEndpoint.watchEndpoint.videoId) ||
+      null;
+    if (!videoId) return;
+    lastNextVideoId = videoId;
+
+    const rows = [];
+    collectInfoRows(resJson, rows);
+    const music = {};
+    for (const row of rows) {
+      const label = fold(textOf(row.title));
+      const value = textOf(row.defaultMetadata) || textOf(row.expandedMetadata) || '';
+      if (!value) continue;
+      if (MUSIC_LABELS.song.has(label) && !music.song) music.song = value;
+      else if (MUSIC_LABELS.artist.has(label) && !music.artist) music.artist = value;
+      else if (MUSIC_LABELS.album.has(label) && !music.album) music.album = value;
+    }
+    const mvt = resJson && resJson.playerResponse && resJson.playerResponse.videoDetails && resJson.playerResponse.videoDetails.musicVideoType;
+    if (music.song || music.artist || music.album || mvt) {
+      const payload = { id: videoId };
+      if (music.song || music.artist || music.album) payload.music = music;
+      if (mvt) payload.mvType = mvt;
+      putMeta(payload);
+    }
+  }
+
+  // Fresh page loads on youtube.com embed everything in ytInitialData /
+  // ytInitialPlayerResponse — /next is only fetched on SPA navigations.
+  // Poll briefly for the globals, then run the same info-row scan.
+  function watchInitial() {
+    if (location.hostname !== 'www.youtube.com') return;
+    let tries = 0;
+    const t = setInterval(() => {
+      const ipr = window.ytInitialPlayerResponse;
+      const idata = window.ytInitialData;
+      tries++;
+      // Music rows live in ytInitialData; wait for it, but accept the player
+      // response alone after ~6s (ytCategory still helps classification).
+      if (!idata && !(ipr && tries > 15)) {
+        if (tries > 50) clearInterval(t);
+        return;
+      }
+      clearInterval(t);
+      try {
+        const videoId =
+          (ipr && ipr.videoDetails && ipr.videoDetails.videoId) ||
+          new URLSearchParams(location.search).get('v');
+        if (!videoId) return;
+        lastNextVideoId = videoId;
+        const micro = ipr && ipr.microformat && ipr.microformat.playerMicroformatRenderer;
+        const music = {};
+        const rows = [];
+        if (idata) collectInfoRows(idata, rows);
+        for (const row of rows) {
+          const label = fold(textOf(row.title));
+          const value = textOf(row.defaultMetadata) || textOf(row.expandedMetadata) || '';
+          if (!value) continue;
+          if (MUSIC_LABELS.song.has(label) && !music.song) music.song = value;
+          else if (MUSIC_LABELS.artist.has(label) && !music.artist) music.artist = value;
+          else if (MUSIC_LABELS.album.has(label) && !music.album) music.album = value;
+        }
+        const payload = { id: videoId };
+        if (music.song || music.artist || music.album) payload.music = music;
+        if (micro && micro.category) payload.ytCategory = micro.category;
+        const mvt = ipr && ipr.videoDetails && ipr.videoDetails.musicVideoType;
+        if (mvt) payload.mvType = mvt;
+        if (payload.music || payload.ytCategory || payload.mvType) putMeta(payload);
+      } catch {
+        /* initial data shape changed */
+      }
+    }, 400);
+  }
+  watchInitial();
+
   function handleBrowse(reqJson, resJson) {
     const bid = reqJson && reqJson.browseId;
     // Usually the /next response mapped browseId -> videoId already. If we
@@ -219,10 +319,19 @@
   }
 
   const origFetch = window.fetch;
+  const ORIGINS = new Set(['music.youtube.com', 'www.youtube.com']);
   window.fetch = async function (input, init) {
     const url = typeof input === 'string' ? input : (input && input.url) || '';
-    const isNext = url.startsWith('https://music.youtube.com/youtubei/v1/next');
-    const isBrowse = url.startsWith('https://music.youtube.com/youtubei/v1/browse');
+    let path = '';
+    try {
+      const u = new URL(url);
+      if (!ORIGINS.has(u.host)) return origFetch.call(this, input, init);
+      path = u.pathname;
+    } catch {
+      return origFetch.call(this, input, init);
+    }
+    const isNext = path.startsWith('/youtubei/v1/next');
+    const isBrowse = path.startsWith('/youtubei/v1/browse');
     if (!isNext && !isBrowse) return origFetch.call(this, input, init);
 
     const res = await origFetch.call(this, input, init);
@@ -245,8 +354,10 @@
             return;
           }
           try {
-            if (isNext) handleNext(reqJson, resJson);
-            else handleBrowse(reqJson, resJson);
+            if (isNext) {
+              handleNext(reqJson, resJson); // YTM queue/lyrics-tab data
+              handleWatchNext(reqJson, resJson); // youtube.com music metadata
+            } else handleBrowse(reqJson, resJson);
           } catch {
             /* response shape changed — stay silent */
           }

@@ -28,7 +28,7 @@ YTM Lyrics+ adds a focused, zero-configuration lyrics view to the YouTube Music 
 - Falls back to lyrics text already available in YouTube Music when no provider has a match.
 - Provider attribution shown under the lyrics.
 
-Open a track in YouTube Music — lyrics appear on their own. YTM Lyrics+ works only on `music.youtube.com` and does not require a separate account.
+Open a track in YouTube Music — lyrics appear on their own. On regular YouTube (`youtube.com`), a lyrics card appears next to music videos (toggleable from the extension popup). YTM Lyrics+ runs only on `music.youtube.com` and `www.youtube.com` and does not require a separate account.
 
 **Privacy:** To find lyrics, the extension sends the current track title and artist to LRCLIB and lrc.cx. It also sends the album name and duration when available. Playback position stays in your browser. Lyrics, sync offsets, and popup preferences are stored locally on your device. The extension does not sell this information, use it for ads, or store it on its own server. Read the full privacy policy at the URL provided in the Store listing.
 
@@ -51,9 +51,9 @@ The background service worker makes HTTPS requests to LRCLIB’s `/api/get` endp
 
 Fetched lyrics are cached in `chrome.storage.local` so replayed songs load instantly and work offline, and per-song sync offsets set by the user are remembered. All data stays on the user’s device; nothing is transmitted to a developer-operated server.
 
-### Content script match: `https://music.youtube.com/*`
+### Content script matches: `https://music.youtube.com/*` and `https://www.youtube.com/*`
 
-The content script runs only on YouTube Music. It reads the current player’s track metadata, duration, and playback position (including via YouTube Music’s own in-page player API and lyric responses); detects the Lyrics view; displays and synchronizes lyrics; lets the user click a timed line to seek or right-click a line to set a timing offset; and offers an optional fullscreen lyrics view. The playback position remains local to the page. The script does not run on other websites.
+The content script runs only on YouTube Music and regular YouTube. On YouTube Music it reads the current player’s track metadata, duration, and playback position (including via YouTube Music’s own in-page player API and lyric responses); detects the Lyrics view; displays and synchronizes lyrics; lets the user click a timed line to seek or right-click a line to set a timing offset; and offers an optional fullscreen lyrics view. On youtube.com it shows a lyrics card on watch pages for videos identified as music (YouTube’s own music metadata, category, or music channel), using the same in-page player API; non-music videos are untouched. The playback position remains local to the page. The script does not run on other websites.
 
 ## Listing image checklist
 

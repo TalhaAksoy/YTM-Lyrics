@@ -36,6 +36,9 @@
       const title = d && d.title;
       if (!videoId || !title || !isFinite(duration) || duration <= 0) return;
 
+      const micro = resp && resp.microformat && resp.microformat.playerMicroformatRenderer;
+      const adShowing = p.classList && p.classList.contains('ad-showing');
+
       document.dispatchEvent(new CustomEvent(SNAP_EVENT, {
         detail: {
           videoId,
@@ -45,6 +48,9 @@
           currentTime: p.getCurrentTime ? p.getCurrentTime() : 0,
           playing: !!(st && st.isPlaying && !st.isBuffering && !st.isSeeking && !st.isUiSeeking),
           rate: video ? video.playbackRate : 1,
+          category: (micro && micro.category) || '',
+          mvType: (resp && resp.videoDetails && resp.videoDetails.musicVideoType) || '',
+          ad: !!adShowing,
           t: Date.now(),
         },
       }));

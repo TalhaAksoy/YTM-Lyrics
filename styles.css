@@ -105,6 +105,132 @@ ytmusic-tab-renderer.ytml-plus-host > *:not(#ytml-plus-root):not(#ytml-plus-jump
   text-shadow: 0 0 18px rgba(255, 255, 255, 0.22);
 }
 
+/* ---- youtube.com watch page: in-player split view ---- */
+/* The lyrics card lives inside #movie_player. `.ytml-split` letterboxes the
+   video into the left share and shrinks the control bar to match; the panel
+   takes the right slice. Page layout outside the player is untouched. */
+#ytml-ytpanel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: calc(var(--ytml-lyrics-f, 0.2) * 100%);
+  min-width: 150px;
+  z-index: 40;
+  background: rgba(8, 8, 8, 0.92);
+  border-left: 1px solid rgba(255, 255, 255, 0.12);
+  overflow: visible;
+}
+
+/* The video box is never touched — resizing YouTube's MSE-driven <video>
+   breaks its paint. A pure GPU transform scales it into the left share:
+   same pixels, same box, no layout, no repaint risk. */
+#movie_player.ytml-split:not(.ytp-mini) .html5-video-container video.html5-main-video {
+  transform: scale(calc(1 - var(--ytml-lyrics-f, 0.2))) !important;
+  transform-origin: left center !important;
+}
+
+/* Keep every player control inside the video's share so nothing slides under
+   the lyrics slice — over-constrained LTR boxes resolve via left+width. */
+#movie_player.ytml-split:not(.ytp-mini) .ytp-chrome-bottom {
+  width: calc((1 - var(--ytml-lyrics-f, 0.2)) * 100% - 24px) !important;
+}
+
+#movie_player.ytml-split:not(.ytp-mini) .ytp-chrome-top {
+  width: calc((1 - var(--ytml-lyrics-f, 0.2)) * 100%) !important;
+}
+
+#movie_player.ytp-mini #ytml-ytpanel {
+  display: none;
+}
+
+/* the player's autohide cursor:none would otherwise kill the pointer over us */
+#movie_player.ytp-autohide #ytml-ytpanel {
+  cursor: default;
+}
+
+#ytml-ytpanel #ytml-plus-root {
+  height: 100% !important;
+}
+
+#ytml-ytgrip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -7px;
+  width: 14px;
+  cursor: col-resize;
+  z-index: 5;
+}
+
+#ytml-ytgrip::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 5px;
+  transform: translateY(-50%);
+  width: 4px;
+  height: 34px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.22);
+  transition: background 0.15s ease, height 0.15s ease;
+}
+
+#ytml-ytgrip:hover::after,
+body.ytml-colresize #ytml-ytgrip::after {
+  background: #fff;
+  height: 46px;
+}
+
+body.ytml-colresize {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+body.ytml-colresize video,
+body.ytml-colresize iframe {
+  pointer-events: none !important;
+}
+
+#ytml-ytclose {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 3;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+#ytml-ytclose:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
+
+#ytml-ytpanel #ytml-plus-root .ytml-line {
+  font-size: 20px;
+}
+
+/* In-player lyrics toggle (sits in .ytp-right-controls next to cc) */
+.ytp-button.ytml-yt-ctrl {
+  opacity: 0.9;
+}
+.ytp-button.ytml-yt-ctrl svg {
+  padding: 6px;
+  box-sizing: border-box;
+}
+.ytp-button.ytml-yt-ctrl.ytml-off {
+  opacity: 0.4;
+}
+
 /* Karaoke fill disabled (popup setting) — active line is solid white */
 html.ytml-nofill #ytml-plus-root .ytml-line.ytml-active:not([data-words]),
 html.ytml-nofill #ytml-plus-root .ytml-line.ytml-active .ytml-w {

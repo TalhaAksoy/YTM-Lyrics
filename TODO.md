@@ -12,7 +12,7 @@
   cd youtube-music-lyrics
   zip -r ../ytm-lyrics-plus.zip manifest.json background.js content.js sniffer.js player-bridge.js popup.html popup.js styles.css icons/ytm-lyrics-16.png icons/ytm-lyrics-48.png icons/ytm-lyrics-128.png
   ```
-- [ ] **Reload & smoke-test once more** — `chrome://extensions` → reload → YouTube Music → Lyrics tab. Cover: a synced song (line fill + auto-open), a karaoke song (word-by-word via lrc.cx), a song with a disabled lyrics tab, right-click re-sync + `↺ sync` reset, fullscreen (`⤢` + `Esc` + transport controls), a reload/replay to confirm the offline cache, and a **music video** to verify the segmentMap auto-timing fix (set `window.__ytmlDebug = true` to see `segMap applied` in the console).
+- [ ] **Reload & smoke-test once more** — `chrome://extensions` → reload → YouTube Music → Lyrics tab. Cover: a synced song (line fill + auto-open), a karaoke song (word-by-word via lrc.cx), a song with a disabled lyrics tab, right-click re-sync + `↺ sync` reset, fullscreen (`⤢` + `Esc` + transport controls), a reload/replay to confirm the offline cache, a **music video** to verify the segmentMap auto-timing fix (set `window.__ytmlDebug = true` to see `segMap applied` in the console) — and on **youtube.com**: a music video (lyrics card in the right column), a non-music video (no card), an ad break (panel freezes, no ad-metadata lookup), and the popup's "Lyrics on youtube.com" toggle.
 
 ## Store form fields
 

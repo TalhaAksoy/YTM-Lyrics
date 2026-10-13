@@ -5,10 +5,12 @@
   const ROOT_ID = 'ytml-plus-root';
   const HOST_CLASS = 'ytml-plus-host';
   const POLL_MS = 800;
+  const IS_YTM = location.hostname === 'music.youtube.com';
+  const IS_YT = location.hostname === 'www.youtube.com';
 
-  const STORE_LYRICS = 'ytmlCacheV2'; // {key: {data, ts}} — bumped: pre-v1.1 matches weren't title-verified
+  const STORE_LYRICS = 'ytmlCacheV3'; // {key: {data, ts}} — bumped: pre-v1.2 titles kept noise like "prod. X"
   const STORE_OFFSETS = 'ytmlOffsets'; // {key: seconds}
-  const STORE_PREFS = 'ytmlPrefs'; // {fill, autoOpen}
+  const STORE_PREFS = 'ytmlPrefs'; // {fill, autoOpen, yt}
   const STORE_CAP = 250;
   const TTL_LYRICS = 30 * 24 * 3600e3;
   const TTL_NONE = 3 * 24 * 3600e3;
@@ -36,6 +38,8 @@
   let root = null;
   let trackKey = null;
   let appliedKey = null;
+  let dead = false;
+  let scheduled = false; // hoisted — sniffed/schedule run during init (replay)
   let lyrics = null;
   let lineEls = [];
   let activeIdx = -1;
@@ -56,6 +60,10 @@
   let fsCurEl = null;
   let fsDurEl = null;
   let fsPaused = null;
+  let ytPanelEl = null; // youtube.com: floating card on document.body
+  let ytCtrlBtn = null; // youtube.com: .ytp-right-controls toggle button
+  let ytCardHidden = false; // session toggle from the in-player button
+  const ytDismissed = new Set(); // videoId keys hidden via the card's × button
   let toastTimer = null;
   let jumpRaf = false;
   let fullscreen = false;
@@ -65,7 +73,7 @@
   const fetchRetries = new Map(); // key -> count
   const retryAfter = new Map(); // key -> timestamp
   const offsets = new Map(); // key -> seconds
-  const prefs = { fill: false, autoOpen: true };
+  const prefs = { fill: false, autoOpen: true, yt: true };
   let playerSnap = null; // latest MAIN-world player snapshot (videoId/title/artist/duration)
   let currentMeta = null; // sniffed Innertube metadata for the playing videoId
   let lastResult = null; // last applied lyrics result (pre-segmap transform)
@@ -76,9 +84,12 @@
   const userNavigated = new Set();
   let storageMiss = new Set(); // keys known absent in storage
 
+  // Debug flag must be reachable from the ISOLATED world — window.* set in the
+  // DevTools console lives in the MAIN world and never crosses the boundary.
+  // localStorage is shared, so `localStorage.ytmlDebug='1'` is the switch.
   const dbg = (...a) => {
     try {
-      if (window.__ytmlDebug) console.debug('[ytml+]', ...a);
+      if (window.__ytmlDebug || localStorage.getItem('ytmlDebug') === '1') console.log('[ytml+]', ...a);
     } catch { /* noop */ }
   };
 
@@ -95,6 +106,7 @@
   document.addEventListener('ytml-sniffed', e => {
     const d = e && e.detail;
     if (!d) return;
+    try {
     if (d.type === 'meta' && d.meta && d.meta.id) {
       sniffedMeta.set(d.meta.id, d.meta);
       if (playerSnap && playerSnap.videoId === d.meta.id) {
@@ -118,6 +130,9 @@
         }
       }
       schedule();
+    }
+    } catch (err) {
+      dbg('sniffed handler error', err);
     }
   });
   // Sniffer runs at document_start, before us — ask it to replay its captures.
@@ -226,6 +241,9 @@
       const thumb = document.querySelector('ytmusic-player-bar img');
       url = thumb ? thumb.src : '';
     }
+    if (!url && IS_YT && playerSnap && playerSnap.videoId) {
+      url = `https://i.ytimg.com/vi/${playerSnap.videoId}/hqdefault.jpg`;
+    }
     return url.replace(/=w\d+-h\d+/, '=w600-h600');
   }
 
@@ -240,7 +258,64 @@
     return false;
   }
 
+  // youtube.com: "Artist - Title (Official Video)" patterns + "- Topic"
+  // channels. Music-section rows from the sniffer win when present.
+  function parseYtTitle(vt, author) {
+    const isTopic = /-\s*Topic$/i.test(author || '');
+    const chanArtist = (author || '').replace(/\s+-\s+Topic$/i, '').replace(/VEVO$/i, '').trim();
+    const s = (vt || '')
+      .replace(/[([][^\])]*(official|video|audio|lyrics?|visuali[sz]er|hd|hq|4k|8k|remaster(?:ed)?|explicit|clean|mono|stereo|m\/?v|prod\.?|feat\.?|ft\.?|featuring)[^\])]*[\])]/gi, ' ')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+    // bare "prod. X" / "feat. X" tails also pollute YouTube titles
+    const clean = t => (t || '')
+      .replace(/\s+(prod\.?|produced by|prod by)\b.*$/i, '')
+      .replace(/\s+(feat\.?|ft\.?|featuring)\b.*$/i, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+    const parts = s.split(/\s+[-–—]\s+/).filter(Boolean);
+    // "- Topic" channels are authoritative for the artist; the title may put
+    // the artist on either side of the dash, so drop that part wherever it is.
+    if (isTopic && chanArtist) {
+      const rest = parts.filter(p => p.toLowerCase() !== chanArtist.toLowerCase());
+      return { title: clean(rest.join(' - ')) || s || (vt || ''), artist: chanArtist };
+    }
+    if (parts.length >= 2 && parts[0] && parts.slice(1).join('').trim()) {
+      return { title: clean(parts.slice(1).join(' - ')) || parts.slice(1).join(' - ').trim(), artist: parts[0].trim() };
+    }
+    return { title: clean(s) || (vt || ''), artist: chanArtist };
+  }
+
   function getTrack() {
+    if (IS_YT) {
+      const snap = playerSnap;
+      if (!snap || !snap.videoId) return null;
+      const meta = sniffedMeta.get(snap.videoId);
+      const music = meta && meta.music;
+      const parsed = parseYtTitle(snap.title, snap.artist);
+      const title = (music && music.song) || parsed.title;
+      const artist = (music && music.artist) || parsed.artist;
+      if (!title) return null;
+      const isMusic =
+        !!(music && (music.song || music.artist)) ||
+        snap.category === 'Music' ||
+        (meta && meta.ytCategory === 'Music') ||
+        String(snap.mvType || (meta && meta.mvType) || '').includes('MUSIC') ||
+        /-\s*Topic$/i.test(snap.artist || '');
+      const dur = Math.round(snap.duration || (meta && meta.durationMs / 1000) || 0);
+      if (!dur) return null;
+      return {
+        title,
+        artist,
+        album: (music && music.album) || '',
+        duration: dur,
+        key: `v:${snap.videoId}`,
+        videoId: snap.videoId,
+        meta,
+        isMusic,
+      };
+    }
+
     const titleEl = firstSel(SEL.title);
     const domTitle = titleEl ? titleEl.textContent.trim() : '';
     const byline = firstSel(SEL.byline);
@@ -336,7 +411,103 @@
     schedule();
   }
 
+  // youtube.com: the card lives INSIDE #movie_player — the video element is
+  // letterboxed into the left ~80% via `object-fit: contain` and the panel
+  // takes the right slice. A left-edge grip adjusts the split, persisted as a
+  // fraction. Nothing outside the player is touched.
+  const YT_SPLIT_KEY = 'ytmlYtSplit'; // lyrics width as a fraction of the player
+  function ytSplitFrac() {
+    const f = Number(localStorage.getItem(YT_SPLIT_KEY));
+    return f >= 0.14 && f <= 0.45 ? f : 0.2;
+  }
+  function getYtPanel() {
+    if (location.pathname !== '/watch') return null;
+    const mp = document.getElementById('movie_player') ||
+      document.querySelector('.html5-video-player');
+    if (!mp) {
+      dbg('yt: movie_player not found');
+      return null;
+    }
+    if (!ytPanelEl) {
+      ytPanelEl = document.createElement('div');
+      ytPanelEl.id = 'ytml-ytpanel';
+
+      const grip = document.createElement('div');
+      grip.id = 'ytml-ytgrip';
+      grip.title = 'Drag to resize';
+      grip.setAttribute('role', 'separator');
+      grip.setAttribute('aria-orientation', 'vertical');
+      grip.addEventListener('pointerdown', e => {
+        e.preventDefault();
+        const host = ytPanelEl && ytPanelEl.parentNode;
+        if (!host) return;
+        const rect = host.getBoundingClientRect();
+        const move = ev => {
+          const frac = Math.min(0.45, Math.max(0.14, (rect.right - ev.clientX) / rect.width));
+          host.style.setProperty('--ytml-lyrics-f', frac.toFixed(3));
+          try { localStorage.setItem(YT_SPLIT_KEY, frac.toFixed(3)); } catch { /* noop */ }
+        };
+        const up = () => {
+          window.removeEventListener('pointermove', move);
+          window.removeEventListener('pointerup', up);
+          document.body.classList.remove('ytml-colresize');
+        };
+        window.addEventListener('pointermove', move);
+        window.addEventListener('pointerup', up);
+        document.body.classList.add('ytml-colresize');
+      });
+      ytPanelEl.appendChild(grip);
+
+      const close = document.createElement('button');
+      close.id = 'ytml-ytclose';
+      close.type = 'button';
+      close.textContent = '×';
+      close.title = 'Hide lyrics for this video';
+      close.setAttribute('aria-label', 'Hide lyrics for this video');
+      close.addEventListener('click', () => {
+        if (trackKey) ytDismissed.add(trackKey);
+        teardown();
+      });
+      ytPanelEl.appendChild(close);
+    }
+    if (ytPanelEl.parentNode !== mp) {
+      mp.appendChild(ytPanelEl);
+      dbg('yt: card injected into player');
+    }
+    mp.classList.add('ytml-split');
+    mp.style.setProperty('--ytml-lyrics-f', ytSplitFrac().toFixed(3));
+    return ytPanelEl;
+  }
+
+  // YouTube's own right-hand control cluster (settings/cc/fullscreen row).
+  // The player bar re-renders itself, so the button is re-pinned each poll.
+  function ensureYtCtrlBtn() {
+    const host = document.querySelector('.ytp-right-controls');
+    if (!host) return;
+    if (!ytCtrlBtn) {
+      ytCtrlBtn = document.createElement('button');
+      ytCtrlBtn.className = 'ytp-button ytml-yt-ctrl';
+      ytCtrlBtn.type = 'button';
+      ytCtrlBtn.title = 'Lyrics';
+      ytCtrlBtn.setAttribute('aria-label', 'Toggle lyrics panel');
+      ytCtrlBtn.setAttribute('aria-pressed', 'true');
+      ytCtrlBtn.innerHTML =
+        '<svg viewBox="0 0 24 24" width="100%" height="100%" style="display:block">' +
+        '<path fill="currentColor" d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z"/></svg>';
+      ytCtrlBtn.addEventListener('click', () => {
+        ytCardHidden = !ytCardHidden;
+        ytCtrlBtn.classList.toggle('ytml-off', ytCardHidden);
+        ytCtrlBtn.setAttribute('aria-pressed', String(!ytCardHidden));
+        if (ytCardHidden) teardown();
+        else update();
+      });
+    }
+    if (ytCtrlBtn.parentNode !== host) host.prepend(ytCtrlBtn);
+  }
+
   function findPanel() {
+    if (IS_YT) return getYtPanel();
+
     const page = getPage();
     if (!page) return null;
 
@@ -377,6 +548,12 @@
     if (fsBtn && fsBtn.isConnected) fsBtn.remove();
     if (syncChip && syncChip.isConnected) syncChip.remove();
     if (toastEl && toastEl.isConnected) toastEl.remove();
+    if (ytPanelEl && ytPanelEl.isConnected) ytPanelEl.remove();
+    ytPanelEl = null;
+    for (const el of document.querySelectorAll('.ytml-split')) {
+      el.classList.remove('ytml-split');
+      el.style.removeProperty('--ytml-lyrics-f');
+    }
     if (panel) panel.classList.remove(HOST_CLASS);
     panel = null;
     lyrics = null;
@@ -405,9 +582,11 @@
     panel.appendChild(root);
     ensureControls();
     const vh = window.innerHeight;
-    const h = measuredHeight > 160 && measuredHeight < vh * 1.5
-      ? measuredHeight
-      : Math.max(280, vh - 240);
+    const h = panel === ytPanelEl
+      ? Math.min(560, Math.max(300, Math.round(vh * 0.52)))
+      : measuredHeight > 160 && measuredHeight < vh * 1.5
+        ? measuredHeight
+        : Math.max(280, vh - 240);
     root.style.height = h + 'px';
     appliedKey = null;
   }
@@ -433,7 +612,14 @@
     const p = findPanel();
     if (!p) return null;
     if (p !== panel) {
-      teardown();
+      if (IS_YT) {
+        // teardown() removes ytPanelEl itself — on YT the panel IS ours, so
+        // just swap hosts; everything inside the card already belongs to us.
+        exitFullscreen();
+        if (panel) panel.classList.remove(HOST_CLASS);
+      } else {
+        teardown();
+      }
       panel = p;
       const ph = panel.clientHeight;
       panel.classList.add(HOST_CLASS);
@@ -574,7 +760,7 @@
     if (offsetsLoaded) return;
     offsetsLoaded = true;
     try {
-      await chrome.storage.local.remove('ytmlCache'); // v1 cache: unverified matches
+      await chrome.storage.local.remove(['ytmlCache', 'ytmlCacheV2']); // stale caches: unverified matches / noisy titles
     } catch { /* storage unavailable */ }
     try {
       const obj = (await chrome.storage.local.get(STORE_OFFSETS))[STORE_OFFSETS];
@@ -919,12 +1105,38 @@
       die();
       return;
     }
+    if (IS_YT) {
+      // Stay invisible outside watch pages and when disabled; freeze during ads
+      // (ad-showing swaps player data — keep the panel, just stop updating).
+      if (!prefs.yt || location.pathname !== '/watch') {
+        dbg('yt: inactive', { yt: prefs.yt, path: location.pathname });
+        teardown();
+        return;
+      }
+      if (playerSnap && playerSnap.ad) {
+        dbg('yt: ad freeze');
+        return;
+      }
+      ensureYtCtrlBtn();
+    }
     const track = getTrack();
-    if (!track) return;
+    if (!track) {
+      if (IS_YT) dbg('yt: no track', { snap: !!playerSnap, vid: playerSnap && playerSnap.videoId });
+      return;
+    }
+    if (IS_YT && !track.isMusic) {
+      dbg('yt: not music —', { cat: playerSnap && playerSnap.category, mvt: playerSnap && playerSnap.mvType, author: playerSnap && playerSnap.artist, music: track.meta && track.meta.music });
+      teardown();
+      return;
+    }
+    if (IS_YT && (ytCardHidden || ytDismissed.has(track.key))) {
+      teardown();
+      return;
+    }
     forceEnableLyricsTab();
     const cached = cache.get(track.key);
     if (cached === 'none') {
-      if (forcedLyricsSelected() && ensureUI()) renderStatus('No lyrics found for this song');
+      if ((IS_YT || forcedLyricsSelected()) && ensureUI()) renderStatus('No lyrics found for this song');
       else teardown();
       return;
     }
@@ -1020,7 +1232,7 @@
           fsPlayEl.innerHTML = v.paused ? SVG_PLAY : SVG_PAUSE;
         }
       }
-      if (root && root.isConnected && lyrics && lyrics.synced && !document.hidden && v) {
+      if (root && root.isConnected && lyrics && lyrics.synced && !document.hidden && v && !(IS_YT && playerSnap && playerSnap.ad)) {
         const t = v.currentTime - currentOffset;
         const idx = binarySearch(lyrics.lines, t);
         if (idx !== activeIdx) {
@@ -1150,7 +1362,7 @@
     fsArtistEl.textContent = t.artist;
     const byline = firstSel(SEL.byline);
     const parts = byline ? byline.textContent.split('•').map(s => s.trim()).filter(Boolean) : [];
-    const alb = (currentMeta && currentMeta.album) || '';
+    const alb = t.album || (currentMeta && currentMeta.album) || '';
     const rest = parts.slice(1).filter(p => !alb || p !== alb);
     fsAlbumEl.textContent = [alb, ...rest].filter(Boolean).join(' · ') || parts.slice(1).join(' · ');
     const url = artworkUrl();
@@ -1181,7 +1393,6 @@
     }
   }
 
-  let dead = false;
   let poll = null;
   let observer = null;
 
@@ -1200,7 +1411,6 @@
     if (poll) clearInterval(poll);
   }
 
-  let scheduled = false;
   function schedule() {
     if (scheduled || dead) return;
     scheduled = true;
@@ -1214,10 +1424,13 @@
     for (const m of muts) {
       if (m.type === 'attributes') {
         const t = m.target;
-        if (t && t.closest && t.closest('ytmusic-player-page')) return schedule();
+        if (IS_YTM && t && t.closest && t.closest('ytmusic-player-page')) return schedule();
         continue;
       }
       if (root && !root.isConnected && !fullscreen) return schedule();
+      // On youtube.com the 800ms poll covers #secondary appearing; skip the
+      // ancestor walk — YouTube's DOM churn makes it wasteful.
+      if (!IS_YTM) continue;
       for (const n of m.addedNodes) {
         if (n.nodeType !== 1 || n === root || n === jumpBtn || n === fsBtn || n === syncChip || n === toastEl) continue;
         if (n.closest && n.closest('ytmusic-player-page')) return schedule();
@@ -1262,7 +1475,9 @@
     if (!root || !panel || fullscreen) return;
     const ph = panel.clientHeight;
     const vh = window.innerHeight;
-    root.style.height = (ph > 160 && ph < vh * 1.5 ? ph : Math.max(280, vh - 240)) + 'px';
+    root.style.height = (panel === ytPanelEl
+      ? Math.min(560, Math.max(300, Math.round(vh * 0.52)))
+      : ph > 160 && ph < vh * 1.5 ? ph : Math.max(280, vh - 240)) + 'px';
   });
 
   loadOffsets();
