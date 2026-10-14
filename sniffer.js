@@ -219,11 +219,16 @@
   // only exist in YTM (WEB_REMIX) responses. A same-origin fetch from page JS
   // needs no extra permissions; cookies ride along. Fed through handleNext,
   // the same parser path as intercepted responses.
-  const probed = new Set();
+  // videoId -> { tries, at } — a failed probe used to be dropped forever, so
+  // one transient error meant no segMap for the whole session. Retry a few
+  // times, spaced out, then stop.
+  const probed = new Map();
   async function probeQueue(videoId) {
-    if (!videoId || probed.has(videoId)) return;
-    probed.add(videoId);
-    if (probed.size > 64) probed.delete(probed.values().next().value);
+    if (!videoId) return;
+    const prev = probed.get(videoId);
+    if (prev && (prev.tries >= 3 || Date.now() - prev.at < 15000)) return;
+    probed.set(videoId, { tries: (prev ? prev.tries : 0) + 1, at: Date.now() });
+    if (probed.size > 64) probed.delete(probed.keys().next().value);
     let ctxClient = null;
     try {
       const ctx = window.ytcfg && window.ytcfg.get && window.ytcfg.get('INNERTUBE_CONTEXT');

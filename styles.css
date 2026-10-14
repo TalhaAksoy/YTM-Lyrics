@@ -65,6 +65,13 @@ ytmusic-tab-renderer.ytml-plus-host > *:not(#ytml-plus-root):not(#ytml-plus-jump
   opacity: 0.35 !important;
 }
 
+/* The "PiP is open" affordance — the base bar rule's !important would
+   otherwise pin every button to 0.9 and hide the state. */
+#ytml-bar > button.ytml-on {
+  opacity: 1 !important;
+  background: rgba(80, 80, 80, 0.95);
+}
+
 #ytml-plus-root {
   position: relative;
   overflow-y: auto;
@@ -337,6 +344,17 @@ html.ytml-nofill #ytml-plus-root .ytml-line.ytml-active .ytml-w {
   font-weight: 500;
   letter-spacing: 0.02em;
   padding: 64px 0;
+  text-align: center;
+}
+
+/* The PiP placeholder lives as a direct panel child (root is in the PiP
+   window) — it needs its own styling, clear of the absolute #ytml-bar. */
+ytmusic-tab-renderer.ytml-plus-host > .ytml-status,
+#ytml-ytpanel > .ytml-status {
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 96px 20px 0;
   text-align: center;
 }
 

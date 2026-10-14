@@ -22,7 +22,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   // web-accessible) — the PiP window gets its stylesheet through us instead.
   if (msg.type === 'pipCss') {
     fetch(chrome.runtime.getURL('styles.css'))
-      .then(r => r.text())
+      .then(r => {
+        if (!r.ok) throw new Error('styles.css ' + r.status);
+        return r.text();
+      })
       .then(css => sendResponse({ ok: true, css }))
       .catch(() => sendResponse({ ok: false }));
     return true;
@@ -34,35 +37,45 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 // genuinely not found) or { ok: false, error } on a transient failure that
 // should not be cached as "no lyrics".
 async function fetchLyrics(track) {
-  // Providers race in parallel — total wait is the slowest leg, not the sum.
-  // Preference order is unchanged: LRCLIB result wins over lrc.cx when both hit.
-  const [l, x] = await Promise.allSettled([fromLRCLIB(track), fromLRCCX(track)]);
-  if (l.status === 'fulfilled' && l.value) return { ok: true, data: l.value };
-  if (x.status === 'fulfilled' && x.value) return { ok: true, data: x.value };
-  const sawError = l.status === 'rejected' || x.status === 'rejected';
+  // Providers race; LRCLIB wins on any hit — resolve the moment it lands
+  // instead of waiting out lrc.cx's leg. lrc.cx still runs (it is the only
+  // fallback when LRCLIB misses), but a hit never waits for it.
+  const xp = fromLRCCX(track).then(v => ({ v }), e => ({ e }));
+  const l = await fromLRCLIB(track).then(v => ({ v }), e => ({ e }));
+  if (l.v) return { ok: true, data: l.v };
+  const x = await xp;
+  if (x.v) return { ok: true, data: x.v };
+  const sawError = !!l.e || !!x.e;
   return sawError ? { ok: false, error: 'fetch-failed' } : { ok: true, data: null };
 }
 
 async function fromLRCLIB(track) {
-  const getParams = new URLSearchParams({
-    track_name: track.title || '',
-    artist_name: track.artist || '',
-  });
+  // LRCLIB 400s on empty param values — only send what we actually have,
+  // and never let a failed /get skip the broader /search.
+  const getParams = new URLSearchParams();
+  if (track.title) getParams.set('track_name', track.title);
+  if (track.artist) getParams.set('artist_name', track.artist);
   if (track.album) getParams.set('album_name', track.album);
-  if (track.duration) getParams.set('duration', String(track.duration));
+  if (track.duration) getParams.set('duration', String(Math.round(track.duration)));
 
-  const exact = await fetchJson(`${LRCLIB}/get?${getParams}`);
+  let getErr = null;
+  const exact = getParams.has('track_name')
+    ? await fetchJson(`${LRCLIB}/get?${getParams}`).catch(e => { getErr = e; return null; })
+    : null;
   const parsed = exact && exact.notfound !== true ? lrclibToLyrics(exact) : null;
   if (parsed) return parsed;
 
-  const searchParams = new URLSearchParams({
-    track_name: track.title || '',
-    artist_name: track.artist || '',
-  });
+  const searchParams = new URLSearchParams();
+  if (track.title) searchParams.set('track_name', track.title);
+  if (track.artist) searchParams.set('artist_name', track.artist);
+  if (!searchParams.has('track_name')) return null;
   const list = await fetchJson(`${LRCLIB}/search?${searchParams}`);
   if (Array.isArray(list) && list.length) {
     return lrclibToLyrics(pickBestLrclib(list, track));
   }
+  // /search came back empty but /get failed transiently — surface the error
+  // so the caller retries instead of caching a false "not found".
+  if (getErr) throw getErr;
   return null;
 }
 
