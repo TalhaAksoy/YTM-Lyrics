@@ -77,8 +77,11 @@
       if (player && typeof player.addEventListener === 'function') {
         try { player.addEventListener('onStateChange', emit); } catch { /* noop */ }
       }
-      attachVideo();
     }
+    // A gapless swap can replace the inner <video> while #movie_player
+    // persists — attachVideo no-ops on an unchanged element, so run it
+    // unconditionally or event-driven emits die with the old element.
+    attachVideo();
     emit();
   }
 

@@ -1,10 +1,14 @@
 'use strict';
 
+// Cross-browser API surface: Firefox exposes `browser` (always Promise),
+// Chrome MV3 exposes `chrome` with Promise support — pick whichever exists.
+const browserAPI = globalThis.browser || globalThis.chrome;
+
 const LRCLIB = 'https://lrclib.net/api';
 const LRCCX = 'https://api.lrc.cx/jsonapi';
 const FETCH_TIMEOUT_MS = 9000;
 
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+browserAPI.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (!msg) return false;
   if (msg.type === 'fetchLyrics') {
     fetchLyrics(msg.track)
@@ -21,7 +25,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   // Content scripts cannot fetch chrome-extension:// URLs (styles.css is not
   // web-accessible) — the PiP window gets its stylesheet through us instead.
   if (msg.type === 'pipCss') {
-    fetch(chrome.runtime.getURL('styles.css'))
+    fetch(browserAPI.runtime.getURL('styles.css'))
       .then(r => {
         if (!r.ok) throw new Error('styles.css ' + r.status);
         return r.text();
@@ -71,7 +75,17 @@ async function fromLRCLIB(track) {
   if (!searchParams.has('track_name')) return null;
   const list = await fetchJson(`${LRCLIB}/search?${searchParams}`);
   if (Array.isArray(list) && list.length) {
-    return lrclibToLyrics(pickBestLrclib(list, track));
+    const strict = lrclibToLyrics(pickBestLrclib(list, track));
+    if (strict) return strict;
+  }
+  // Channel/uploader artists (untrusted) both starve /search server-side and
+  // fail artistOk — retry title-only with duration as the anchor.
+  if (track.artist && track.artistTrusted === false) {
+    const wide = await fetchJson(`${LRCLIB}/search?${new URLSearchParams({ track_name: track.title })}`);
+    if (Array.isArray(wide) && wide.length) {
+      const hit = lrclibToLyrics(pickBestLrclib(wide, track, true));
+      if (hit) return hit;
+    }
   }
   // /search came back empty but /get failed transiently — surface the error
   // so the caller retries instead of caching a false "not found".
@@ -81,7 +95,7 @@ async function fromLRCLIB(track) {
 
 // A wrong-song match is worse than no lyrics: candidates must verify against
 // the requested title and artist before duration/sync quality is even scored.
-function pickBestLrclib(list, track) {
+function pickBestLrclib(list, track, relaxed) {
   const wantTitle = norm(track.title);
   const wantArtist = norm(track.artist);
   let best = null;
@@ -89,7 +103,12 @@ function pickBestLrclib(list, track) {
   for (const item of list) {
     if (!item || (!item.syncedLyrics && !item.plainLyrics)) continue;
     if (!titleOk(wantTitle, norm(item.trackName))) continue;
-    if (!artistOk(wantArtist, norm(item.artistName))) continue;
+    if (relaxed) {
+      // No trustworthy artist — duration becomes the anchor. ±5s rejects the
+      // original recording on nightcore-style edits while passing the same
+      // recording's catalogue entries.
+      if (!track.duration || typeof item.duration !== 'number' || Math.abs(item.duration - track.duration) > 5) continue;
+    } else if (!artistOk(wantArtist, norm(item.artistName))) continue;
     let score = item.syncedLyrics ? 0 : 1000;
     if (typeof item.duration === 'number' && track.duration) {
       score += Math.abs(item.duration - track.duration);
@@ -124,8 +143,16 @@ async function fromLRCCX(track) {
   if (track.album) params.set('album', track.album);
 
   const list = await fetchJson(`${LRCCX}?${params}`);
-  if (!Array.isArray(list) || !list.length) return null;
-  return lrccxToLyrics(pickBestLrccx(list, track));
+  if (Array.isArray(list) && list.length) {
+    const strict = lrccxToLyrics(pickBestLrccx(list, track));
+    if (strict) return strict;
+  }
+  // Same relaxed pass as LRCLIB for untrusted (channel-name) artists.
+  if (track.artist && track.artistTrusted === false) {
+    const wide = await fetchJson(`${LRCCX}?${new URLSearchParams({ title: track.title })}`);
+    if (Array.isArray(wide) && wide.length) return lrccxToLyrics(pickBestLrccx(wide, track, true));
+  }
+  return null;
 }
 
 function lrccxToLyrics(item) {
@@ -149,9 +176,11 @@ async function searchLyrics(track) {
   const items = [];
   const rank = { karaoke: 0, synced: 1, plain: 2 };
   try {
-    const q = track.title
-      ? new URLSearchParams({ track_name: track.title, artist_name: track.artist || '' })
-      : new URLSearchParams({ q: track.artist || '' });
+    // LRCLIB 400s on empty params — artist_name only goes in when present.
+    const q = new URLSearchParams();
+    if (track.title) q.set('track_name', track.title);
+    if (track.artist) q.set('artist_name', track.artist);
+    if (!track.title) q.set('q', track.artist || '');
     const list = await fetchJson(`${LRCLIB}/search?${q}`);
     if (Array.isArray(list)) {
       for (const item of list) {
@@ -195,7 +224,7 @@ async function searchLyrics(track) {
   return { ok: true, items: items.slice(0, 8) };
 }
 
-function pickBestLrccx(list, track) {
+function pickBestLrccx(list, track, relaxed) {
   const wantTitle = norm(track.title);
   const wantArtist = norm(track.artist);
   let best = null;
@@ -205,7 +234,9 @@ function pickBestLrccx(list, track) {
     const title = norm(item.title);
     const artist = norm(item.artist);
     if (!titleOk(wantTitle, title)) continue;
-    if (!artistOk(wantArtist, artist)) continue;
+    if (relaxed) {
+      if (!track.duration || typeof item.duration !== 'number' || Math.abs(item.duration - track.duration) > 5) continue;
+    } else if (!artistOk(wantArtist, artist)) continue;
     let score = item.lrc_ttml ? 0 : 400;
     if (wantTitle && title !== wantTitle) score += 30;
     if (wantArtist && artist !== wantArtist) score += 20;
@@ -225,20 +256,40 @@ function contained(shorter, longer, minLen) {
   return shorter.length >= minLen && longer.includes(shorter);
 }
 
+// Catalogue title decorations — extra words that don't make it a different
+// song (edits, packaging, upload qualifiers).
+const TITLE_DECOR = new Set([
+  'remaster', 'remastered', 'version', 'edit', 'mix', 'live', 'acoustic', 'deluxe',
+  'radio', 'single', 'explicit', 'feat', 'ft', 'with', 'prod', 'nightcore', 'sped',
+  'speed', 'slowed', 'reverb', 'up', 'down', 'bootleg', 'cover', 'karaoke',
+  'official', 'audio', 'video', 'lyric', 'lyrics', 'visualizer', 'hd', 'hq',
+  'mono', 'stereo', 'clean', 'extended', 'original', '8d', '16d', 'tiktok', 'bass', 'boosted',
+]);
+
 function titleOk(want, got) {
   if (!want) return true;
   if (!got) return false;
   if (want === got) return true;
   const [s, l] = want.length <= got.length ? [want, got] : [got, want];
-  return contained(s, l, 6);
+  if (contained(s, l, 6)) return true;
+  // Short titles can't use substring containment — accept when the longer side
+  // only adds decoration tokens and keeps every short-side token whole.
+  const sToks = s.split(' ');
+  const lToks = l.split(' ');
+  return sToks.every(t => lToks.includes(t)) && lToks.every(t => sToks.includes(t) || TITLE_DECOR.has(t));
 }
 
 function artistOk(want, got) {
   if (!want) return true;
   if (!got) return false;
   if (want === got) return true;
-  const [s, l] = want.length <= got.length ? [want, got] : [got, want];
-  if (contained(s, l, 5)) return true;
+  // Whitespace-agnostic compare first — catalogue names are frequently
+  // glued/split differently ("NightcoreReality" vs "Nightcore Reality").
+  const wg = want.replace(/ /g, '');
+  const gg = got.replace(/ /g, '');
+  if (wg === gg) return true;
+  const [ws, gl] = wg.length <= gg.length ? [wg, gg] : [gg, wg];
+  if (contained(ws, gl, 5)) return true;
   const stop = new Set(['the', 'feat', 'ft', 'and', 'with', 'x']);
   const gb = new Set(got.split(' '));
   return want.split(' ').some(t => t.length >= 3 && !stop.has(t) && gb.has(t));
@@ -247,6 +298,8 @@ function artistOk(want, got) {
 function norm(s) {
   return (s || '')
     .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
     .replace(/\(.*?\)|\[.*?\]/g, ' ')
     .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim();

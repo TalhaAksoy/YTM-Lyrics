@@ -14,7 +14,20 @@
   const metaByVideo = new Map(); // videoId -> meta object
   const lyricsByVideo = new Map(); // videoId -> {text, source}
   const browseToVideo = new Map(); // lyrics browseId -> videoId
-  let lastNextVideoId = null;
+
+  // Which song the player was on — read live from movie_player. Used only to
+  // attribute a /browse request at the moment it is ISSUED (a lyrics tab fetch
+  // always describes the now-playing song at request time); never store it —
+  // responses land asynchronously and the player may have moved on by then.
+  function currentVideoId() {
+    try {
+      const p = document.getElementById('movie_player');
+      const d = p && p.getVideoData && p.getVideoData();
+      return (d && d.video_id) || null;
+    } catch {
+      return null;
+    }
+  }
 
   const capMap = (m, max) => {
     while (m.size > max) m.delete(m.keys().next().value);
@@ -104,7 +117,6 @@
       (reqJson && reqJson.videoId) ||
       (resJson && resJson.currentVideoEndpoint && resJson.currentVideoEndpoint.watchEndpoint && resJson.currentVideoEndpoint.watchEndpoint.videoId) ||
       null;
-    if (videoId) lastNextVideoId = videoId;
 
     // The Lyrics tab carries a browseEndpoint whose response holds the lyrics
     // text; "unselectable" means YouTube Music has none for this song.
@@ -321,7 +333,6 @@
       (resJson && resJson.currentVideoEndpoint && resJson.currentVideoEndpoint.watchEndpoint && resJson.currentVideoEndpoint.watchEndpoint.videoId) ||
       null;
     if (!videoId) return;
-    lastNextVideoId = videoId;
 
     const rows = [];
     collectInfoRows(resJson, rows);
@@ -365,7 +376,6 @@
           (ipr && ipr.videoDetails && ipr.videoDetails.videoId) ||
           new URLSearchParams(location.search).get('v');
         if (!videoId) return;
-        lastNextVideoId = videoId;
         const micro = ipr && ipr.microformat && ipr.microformat.playerMicroformatRenderer;
         const music = {};
         const rows = [];
@@ -391,12 +401,14 @@
   }
   watchInitial();
 
-  function handleBrowse(reqJson, resJson) {
+  function handleBrowse(reqJson, resJson, reqVideoId) {
     const bid = reqJson && reqJson.browseId;
-    // Usually the /next response mapped browseId -> videoId already. If we
-    // missed it (page loaded before injection), attribute to the last /next
-    // video — the only browse response we parse is the lyrics shelf anyway.
-    const videoId = (bid && browseToVideo.get(bid)) || lastNextVideoId;
+    // Usually the /next response mapped browseId -> videoId already. Otherwise
+    // (gapless auto-advance issues no /next for the new song, or the page
+    // loaded before injection) attribute by which song the player was on when
+    // the request was issued — YTM only browses lyrics for the playing track.
+    const mapped = bid ? browseToVideo.get(bid) : null;
+    const videoId = mapped || reqVideoId;
     if (!videoId) return;
     const shelf =
       resJson &&
@@ -407,7 +419,9 @@
       resJson.contents.sectionListRenderer.contents[0].musicDescriptionShelfRenderer;
     if (!shelf) return;
     const info = { text: textOf(shelf.description) || null, source: textOf(shelf.footer) || null };
-    if (info.text) {
+    // A guessed attribution (unmapped bid) needs the shelf's source footer —
+    // licensed lyrics always carry attribution; an album "About" panel doesn't.
+    if (info.text && (mapped || info.source)) {
       lyricsByVideo.set(videoId, info);
       emit('lyrics', { videoId, text: info.text, source: info.source });
     }
@@ -429,6 +443,9 @@
     const isBrowse = path.startsWith('/youtubei/v1/browse');
     if (!isNext && !isBrowse) return origFetch.call(this, input, init);
 
+    // Snapshot the player's song at REQUEST time — the response-side handler
+    // runs after an await, by which a track transition may have moved it.
+    const reqVideoId = isBrowse ? currentVideoId() : null;
     const res = await origFetch.call(this, input, init);
     try {
       const resClone = res.clone();
@@ -452,7 +469,7 @@
             if (isNext) {
               handleNext(reqJson, resJson); // YTM queue/lyrics-tab data
               handleWatchNext(reqJson, resJson); // youtube.com music metadata
-            } else handleBrowse(reqJson, resJson);
+            } else handleBrowse(reqJson, resJson, reqVideoId);
           } catch {
             /* response shape changed — stay silent */
           }

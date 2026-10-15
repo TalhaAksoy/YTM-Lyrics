@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "YTM Lyrics+",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Karaoke-style lyrics for YouTube Music & YouTube — word-by-word sync, click-to-seek, fullscreen, offline cache. Zero configuration.",
   "icons": {
     "16": "icons/ytm-lyrics-16.png",

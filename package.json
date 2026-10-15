@@ -1,0 +1,11 @@
+{
+  "name": "ytm-lyrics-plus",
+  "version": "1.4.0",
+  "private": true,
+  "description": "Karaoke-style lyrics for YouTube Music & YouTube — word-by-word sync, click-to-seek, fullscreen, offline cache. Zero configuration.",
+  "scripts": {
+    "build": "node scripts/build.js",
+    "build:chrome": "node scripts/build.js chrome",
+    "build:firefox": "node scripts/build.js firefox"
+  }
+}

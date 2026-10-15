@@ -1,5 +1,9 @@
 'use strict';
 
+// Cross-browser API surface: Firefox exposes `browser` (always Promise),
+// Chrome MV3 exposes `chrome` with Promise support — pick whichever exists.
+const browserAPI = globalThis.browser || globalThis.chrome;
+
 const DEFAULTS = { fill: false, autoOpen: true, yt: true };
 const KEY = 'ytmlPrefs';
 
@@ -8,9 +12,9 @@ const autoOpenEl = document.getElementById('autoOpen');
 const ytEl = document.getElementById('yt');
 const verEl = document.getElementById('ver');
 
-verEl.textContent = 'v' + chrome.runtime.getManifest().version;
+verEl.textContent = 'v' + browserAPI.runtime.getManifest().version;
 
-chrome.storage.local.get(KEY).then(res => {
+browserAPI.storage.local.get(KEY).then(res => {
   const prefs = Object.assign({}, DEFAULTS, res[KEY]);
   fillEl.checked = !!prefs.fill;
   autoOpenEl.checked = !!prefs.autoOpen;
@@ -18,7 +22,7 @@ chrome.storage.local.get(KEY).then(res => {
 });
 
 function save() {
-  chrome.storage.local.set({
+  browserAPI.storage.local.set({
     [KEY]: { fill: fillEl.checked, autoOpen: autoOpenEl.checked, yt: ytEl.checked },
   });
 }

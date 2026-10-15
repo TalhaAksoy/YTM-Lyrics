@@ -1,6 +1,10 @@
 (() => {
   'use strict';
 
+  // Cross-browser API surface: Firefox exposes `browser` (always Promise),
+  // Chrome MV3 exposes `chrome` with Promise support — pick whichever exists.
+  const browserAPI = globalThis.browser || globalThis.chrome;
+
   document.documentElement.dataset.ytmlPlus = 'loaded';
   const ROOT_ID = 'ytml-plus-root';
   const HOST_CLASS = 'ytml-plus-host';
@@ -8,7 +12,7 @@
   const IS_YTM = location.hostname === 'music.youtube.com';
   const IS_YT = location.hostname === 'www.youtube.com';
 
-  const STORE_LYRICS = 'ytmlCacheV3'; // {key: {data, ts}} — bumped: pre-v1.2 titles kept noise like "prod. X"
+  const STORE_LYRICS = 'ytmlCacheV4'; // {key: {data, ts}} — bumped: v3 may hold previous-song lyrics scraped mid-transition
   const STORE_OFFSETS = 'ytmlOffsets'; // {key: seconds}
   const STORE_NOSYNC = 'ytmlNosync'; // {key: true} — per-song "show lyrics statically"
   const STORE_PREFS = 'ytmlPrefs'; // {fill, autoOpen, yt}
@@ -73,6 +77,8 @@
   let ytCloseBtn = null; // youtube.com card's × button
   let searchBtn = null; // manual lyrics search toggle
   let findEl = null; // search overlay
+  let findKey = null; // track key the search dialog was opened for
+  let findDur = 0; // duration captured with it — curDur moves on transitions
   let findTitle = null;
   let findArtist = null;
   let findList = null;
@@ -96,6 +102,7 @@
   const cache = new Map(); // key -> lyrics obj | 'none' | 'pending'
   const fetchRetries = new Map(); // key -> count
   const retryAfter = new Map(); // key -> timestamp
+  const noneSig = new Map(); // key -> metadata signature a 'none' was queried with
   const offsets = new Map(); // key -> seconds
   const nosync = new Set(); // track.key set — synced lyrics rendered as static text
   const prefs = { fill: false, autoOpen: true, yt: true };
@@ -133,7 +140,10 @@
     const d = e && e.detail;
     if (d && d.videoId) {
       // Detect the track change on the first bridge frame, not the next poll.
-      if (playerSnap && playerSnap.videoId !== d.videoId) {
+      // Skip while an ad is showing — getVideoData() can return the ad
+      // creative's id, and clearing lyrics for it leaves a stale status up
+      // for the whole break (the tick loop already freezes on ads anyway).
+      if (playerSnap && playerSnap.videoId !== d.videoId && !d.ad) {
         // update() is debounced — clear the previous song's lines right now
         // rather than letting them sit under the new song's clock.
         trackChangedAt = performance.now(); // earliest, most accurate marker
@@ -352,6 +362,19 @@
     return { title: clean(s) || (vt || ''), artist: chanArtist };
   }
 
+  // Same normalization the providers' matchers use — the metadata signature a
+  // 'none' was queried with, so a later-better-resolved track can re-query.
+  function normText(s) {
+    return (s || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/\p{M}/gu, '')
+      .replace(/\(.*?\)|\[.*?\]/g, ' ')
+      .replace(/[^\p{L}\p{N}]+/gu, ' ')
+      .trim();
+  }
+  const trackSig = t => `${normText(t.title)}|${normText(t.artist)}|${t.artistTrusted ? 1 : 0}`;
+
   function getTrack() {
     if (IS_YT) {
       const snap = playerSnap;
@@ -360,7 +383,7 @@
       const music = meta && meta.music;
       const parsed = parseYtTitle(snap.title, snap.artist);
       const title = (music && music.song) || parsed.title;
-      const artist = (music && music.artist) || parsed.artist;
+      let artist = (music && music.artist) || parsed.artist;
       if (!title) return null;
       const isMusic =
         !!(music && (music.song || music.artist)) ||
@@ -370,6 +393,13 @@
         /-\s*Topic$/i.test(snap.artist || '');
       const dur = Math.round(snap.duration || (meta && meta.durationMs / 1000) || 0);
       if (!dur) return null;
+      // Structured "Music in this video" rows carry the canonical artist;
+      // title-parsed/channel names are only hints for provider matching.
+      let artistTrusted = !!(music && music.artist);
+      if (artist && /\s*[-–]\s*Topic$/i.test(artist)) {
+        artist = artist.replace(/\s*[-–]\s*Topic$/i, '');
+        artistTrusted = true;
+      }
       return {
         title,
         artist,
@@ -379,6 +409,7 @@
         videoId: snap.videoId,
         meta,
         isMusic,
+        artistTrusted,
       };
     }
 
@@ -397,9 +428,17 @@
     const title = (meta && meta.title) || (snap && snap.title) || domTitle || (md && md.title) || '';
     if (!title) return null;
 
-    const artist = (meta && meta.artist) || (snap && snap.artist) || domArtist || (md && md.artist) || '';
+    let artist = (meta && meta.artist) || (snap && snap.artist) || domArtist || (md && md.artist) || '';
     const album = (meta && meta.album) || (md && md.title === title ? md.album || '' : '');
     const videoId = snap && snap.videoId ? snap.videoId : null;
+    // A queue-metadata byline on a *song* entry (square artwork → !isVideo) is
+    // the canonical artist; video/channel names are hints, not proof. "- Topic"
+    // channels strip to the canonical artist.
+    let artistTrusted = !!(meta && meta.artist && !meta.isVideo);
+    if (artist && /\s*[-–]\s*Topic$/i.test(artist)) {
+      artist = artist.replace(/\s*[-–]\s*Topic$/i, '');
+      artistTrusted = true;
+    }
 
     // Duration: meta/snap travel atomically with the videoId, while the DOM
     // time display lags on auto-advance — a stale duration feeds the provider
@@ -422,7 +461,7 @@
     // videoId keys are stabler than title/artist/duration strings — and correct:
     // a song's offset/cache lives with the exact version that played.
     const key = videoId ? `v:${videoId}` : `${title}::${artist}::${dur}`;
-    return { title, artist, album, duration: dur, key, videoId, meta };
+    return { title, artist, album, duration: dur, key, videoId, meta, artistTrusted };
   }
 
   // Full per-song state wipe on track change — anything that can hold a
@@ -691,6 +730,9 @@
     lyrics = null;
     lineEls = [];
     activeIdx = -1;
+    appliedKey = null;
+    lastResult = null;
+    segMapApplied = false;
   }
 
   function controlsParent() {
@@ -897,6 +939,8 @@
       closeFind();
       return;
     }
+    findKey = trackKey;
+    findDur = curDur;
     findTitle.value = curTitle;
     findArtist.value = curArtist;
     findList.innerHTML = '';
@@ -964,9 +1008,9 @@
     findList.appendChild(loading);
     let res = null;
     try {
-      res = await chrome.runtime.sendMessage({
+      res = await browserAPI.runtime.sendMessage({
         type: 'searchLyrics',
-        track: { title, artist, duration: curDur },
+        track: { title, artist, duration: findDur },
       });
     } catch { /* noop */ }
     const items = (res && res.items) || [];
@@ -1001,15 +1045,21 @@
 
   function pickFind(it) {
     closeFind();
-    const key = (playerSnap && playerSnap.videoId) ? `v:${playerSnap.videoId}` : trackKey;
+    // The search ran for the song that was playing when the dialog opened —
+    // store the pick under that key even if playback moved on since. Only
+    // apply it to the panel if that song is still the one playing.
+    const key = findKey || trackKey;
     if (!it.res || !key) return;
-    // A manual pick is an authoritative override: cache it like a provider
-    // hit so it survives reloads until the normal cache TTL lapses.
     cache.set(key, it.res);
     persistLyrics(key, it.res);
-    appliedKey = key;
-    applyResult(it.res);
-    toast(`Lyrics: ${it.title} — ${it.artist}`);
+    const liveKey = playerSnap && playerSnap.videoId ? `v:${playerSnap.videoId}` : trackKey;
+    if (key === liveKey) {
+      appliedKey = key;
+      applyResult(it.res);
+      toast(`Lyrics: ${it.title} — ${it.artist}`);
+    } else {
+      toast(`Saved lyrics for ${it.title} — ${it.artist}`);
+    }
   }
 
   // ---- Bar icons (Material-style SVGs — unicode glyphs were illegible) ----
@@ -1040,7 +1090,7 @@
       // activation, so the click path should not sit behind a message first.
       if (!pipCss && contextAlive()) {
         try {
-          chrome.runtime.sendMessage({ type: 'pipCss' })
+          browserAPI.runtime.sendMessage({ type: 'pipCss' })
             .then(res => { if (res && res.ok) pipCss = res.css; })
             .catch(() => { /* noop */ });
         } catch { /* context invalidated between check and call */ }
@@ -1098,7 +1148,7 @@
     pipOpening = true;
     try {
       if (!pipCss) {
-        const res = await chrome.runtime.sendMessage({ type: 'pipCss' });
+        const res = await browserAPI.runtime.sendMessage({ type: 'pipCss' });
         if (!res || !res.ok) throw new Error('css fetch failed');
         pipCss = res.css;
       }
@@ -1146,6 +1196,7 @@
     if (!panel) return;
     hidePipPlaceholder();
     pipPh = document.createElement('div');
+    pipPh.id = 'ytml-pip-ph';
     pipPh.className = 'ytml-status';
     pipPh.textContent = 'Lyrics in Picture-in-Picture — close the floating window to bring them back';
     panel.appendChild(pipPh);
@@ -1224,16 +1275,16 @@
     if (offsetsLoaded) return;
     offsetsLoaded = true;
     try {
-      await chrome.storage.local.remove(['ytmlCache', 'ytmlCacheV2']); // stale caches: unverified matches / noisy titles
+      await browserAPI.storage.local.remove(['ytmlCache', 'ytmlCacheV2', 'ytmlCacheV3']); // stale caches: unverified matches / noisy titles / mid-transition scrapes
     } catch { /* storage unavailable */ }
     try {
-      const obj = (await chrome.storage.local.get(STORE_OFFSETS))[STORE_OFFSETS];
+      const obj = (await browserAPI.storage.local.get(STORE_OFFSETS))[STORE_OFFSETS];
       if (obj && typeof obj === 'object') {
         for (const [k, v] of Object.entries(obj)) {
           if (typeof v === 'number') offsets.set(k, v);
         }
       }
-      const ns = (await chrome.storage.local.get(STORE_NOSYNC))[STORE_NOSYNC];
+      const ns = (await browserAPI.storage.local.get(STORE_NOSYNC))[STORE_NOSYNC];
       if (ns && typeof ns === 'object') {
         for (const k of Object.keys(ns)) if (ns[k]) nosync.add(k);
       }
@@ -1254,7 +1305,7 @@
         if (keys.length > 500) {
           for (const k of keys.slice(0, keys.length - 500)) delete obj[k];
         }
-        await chrome.storage.local.set({ [STORE_OFFSETS]: obj });
+        await browserAPI.storage.local.set({ [STORE_OFFSETS]: obj });
       } catch { /* storage unavailable */ }
     }, 400);
   }
@@ -1270,7 +1321,7 @@
         if (keys.length > 500) {
           for (const k of keys.slice(0, keys.length - 500)) delete obj[k];
         }
-        await chrome.storage.local.set({ [STORE_NOSYNC]: obj });
+        await browserAPI.storage.local.set({ [STORE_NOSYNC]: obj });
       } catch { /* storage unavailable */ }
     }, 400);
   }
@@ -1280,7 +1331,7 @@
     if (prefsLoaded) return;
     prefsLoaded = true;
     try {
-      const obj = (await chrome.storage.local.get(STORE_PREFS))[STORE_PREFS];
+      const obj = (await browserAPI.storage.local.get(STORE_PREFS))[STORE_PREFS];
       if (obj && typeof obj === 'object') Object.assign(prefs, obj);
     } catch { /* storage unavailable */ }
     applyPrefFill();
@@ -1294,7 +1345,7 @@
   }
 
   try {
-    chrome.storage.onChanged.addListener((changes, area) => {
+    browserAPI.storage.onChanged.addListener((changes, area) => {
       if (area === 'local' && changes[STORE_PREFS]) {
         Object.assign(prefs, changes[STORE_PREFS].newValue || {});
         applyPrefFill();
@@ -1305,7 +1356,7 @@
   async function storedLyrics(key) {
     if (storageMiss.has(key)) return undefined;
     try {
-      const all = (await chrome.storage.local.get(STORE_LYRICS))[STORE_LYRICS] || {};
+      const all = (await browserAPI.storage.local.get(STORE_LYRICS))[STORE_LYRICS] || {};
       const entry = all[key];
       if (!entry) {
         storageMiss.add(key);
@@ -1327,7 +1378,7 @@
     clearTimeout(storeWriteTimer);
     storeWriteTimer = setTimeout(async () => {
       try {
-        const all = (await chrome.storage.local.get(STORE_LYRICS))[STORE_LYRICS] || {};
+        const all = (await browserAPI.storage.local.get(STORE_LYRICS))[STORE_LYRICS] || {};
         for (const [k, v] of pendingStoreWrites) all[k] = v;
         pendingStoreWrites.clear();
         const keys = Object.keys(all);
@@ -1337,7 +1388,7 @@
             .slice(0, keys.length - STORE_CAP)
             .forEach(k => delete all[k]);
         }
-        await chrome.storage.local.set({ [STORE_LYRICS]: all });
+        await browserAPI.storage.local.set({ [STORE_LYRICS]: all });
       } catch { /* storage unavailable */ }
     }, 400);
   }
@@ -1426,7 +1477,11 @@
             e.preventDefault();
             const v = getVideo();
             if (!v) return;
-            setOffset(v.currentTime - line.time, true);
+            // liveTime, not the raw element clock — during a transition the
+            // element can still carry the previous song's tail position.
+            const lt = liveTime(v);
+            if (lt < 0) return;
+            setOffset(lt - line.time, true);
           });
         }
       }
@@ -1469,10 +1524,12 @@
 
   function applyResult(res) {
     if (!res || res === 'none') {
+      lastResult = null;
       teardown();
       return;
     }
     if (res.instrumental) {
+      lastResult = null;
       lyrics = null;
       renderStatus('♪ Instrumental');
       return;
@@ -1521,15 +1578,25 @@
     updateNsyncBtn();
   }
 
-  function nativeFallback() {
-    // Prefer lyrics sniffed from YouTube Music's own /browse response.
-    const vid = playerSnap && playerSnap.videoId;
-    const sniffed = vid ? sniffedLyrics.get(vid) : null;
+  function nativeFallback(track) {
+    // Prefer lyrics sniffed from YouTube Music's own /browse response. Look up
+    // by THIS track's id — the bridge's videoId can already be the next song
+    // while an in-flight fetch resolves (trackKey lags the snap).
+    const sniffed = track ? sniffedLyrics.get(track.videoId) : null;
     if (sniffed && sniffed.text) return ytmLyricsResult(sniffed.text, sniffed.source);
 
     const page = getPage();
     const shelf = page && page.querySelector(SEL.shelf);
     if (!shelf) return null;
+    // The shelf renders the *currently playing* song and YTM rebuilds the tab
+    // panel asynchronously — around a transition it can still show the previous
+    // song's lyrics. Only trust it while getTrack() still resolves this track
+    // (works for both bridge-keyed and DOM-keyed tracks) AND fresh player-page
+    // DOM was added around this track's start.
+    if (!track) return null;
+    const cur = getTrack();
+    if (!cur || cur.key !== track.key) return null;
+    if (pageDomAt < trackChangedAt - 800) return null;
     const desc = shelf.querySelector('.description') || shelf.querySelector('#description') || shelf;
     const text = (desc.innerText || '').trim();
     if (!text || text.split('\n').filter(l => l.trim()).length < 2) return null;
@@ -1581,32 +1648,36 @@
         cache.set(track.key, stored);
         return;
       }
-      const res = await chrome.runtime.sendMessage({ type: 'fetchLyrics', track });
+      const res = await browserAPI.runtime.sendMessage({ type: 'fetchLyrics', track });
       if (res && res.ok) {
-        // nativeFallback reads the CURRENT player's sniffed lyrics — if the
-        // song advanced while the fetch was in flight it would return the
-        // new song's text for this track's key. Only valid while this track
-        // is still the one playing.
-        const stillCurrent = track.key === trackKey;
-        const data = res.data || (stillCurrent ? nativeFallback() : null) || null;
+        // Everything nativeFallback reads is keyed/checked by track.videoId, so
+        // a mid-fetch track change still caches the right song under track.key.
+        const data = res.data || nativeFallback(track) || null;
         const val = data || 'none';
         cache.set(track.key, val);
-        persistLyrics(track.key, data);
+        if (!data) noneSig.set(track.key, trackSig(track));
+        // Persist misses only for trustworthy metadata — a degraded-field miss
+        // (channel-name artist, meta not yet sniffed) stays session-only so a
+        // better-formed later query isn't locked out for the miss TTL.
+        if (data || track.artistTrusted !== false) persistLyrics(track.key, data);
         // A real result upgrades whatever interim/native lyrics are showing.
         if (data && appliedKey === track.key) appliedKey = null;
       } else {
-        cache.delete(track.key);
+        // Keep lyrics the sniffer cached while the provider fetch was in
+        // flight — only delete the 'pending' marker we set ourselves.
+        if (cache.get(track.key) === 'pending') cache.delete(track.key);
         const tries = (fetchRetries.get(track.key) || 0) + 1;
         fetchRetries.set(track.key, tries);
         if (tries >= MAX_FETCH_RETRIES) {
           cache.set(track.key, 'none');
+          noneSig.set(track.key, trackSig(track));
           dbg('gave up fetching', track.key);
         } else {
           retryAfter.set(track.key, Date.now() + Math.min(3000 * 2 ** (tries - 1), 30000));
         }
       }
     } catch {
-      cache.delete(track.key);
+      if (cache.get(track.key) === 'pending') cache.delete(track.key);
       retryAfter.set(track.key, Date.now() + 8000);
     }
   }
@@ -1617,16 +1688,22 @@
       die();
       return;
     }
+    // A stalled bridge (player rebuilt, getVideoData empty) stops emitting but
+    // leaves its last snapshot standing — expire it so a frozen videoId can't
+    // keep the old song's key alive against the new media element.
+    if (playerSnap && Date.now() - playerSnap.t > 5000) playerSnap = null;
+    // Freeze during ads on both hosts — getVideoData() can carry the ad
+    // creative's id, and resolving it as a track would wipe the panel and
+    // send provider lookups for ad metadata.
+    if (playerSnap && playerSnap.ad) {
+      dbgOnce('adfreeze', 'ad freeze');
+      return;
+    }
     if (IS_YT) {
-      // Stay invisible outside watch pages and when disabled; freeze during ads
-      // (ad-showing swaps player data — keep the panel, just stop updating).
+      // Stay invisible outside watch pages and when disabled.
       if (!prefs.yt || location.pathname !== '/watch') {
         dbgOnce('inact:' + location.pathname + ':' + prefs.yt, 'yt: inactive', { yt: prefs.yt, path: location.pathname });
         teardown();
-        return;
-      }
-      if (playerSnap && playerSnap.ad) {
-        dbgOnce('adfreeze', 'yt: ad freeze');
         return;
       }
       ensureYtCtrlBtn();
@@ -1638,6 +1715,7 @@
       // trackKey deliberately stays put: when the track resolves, the normal
       // track-change branch still has to run its full reset for this key.
       if (playerSnap && playerSnap.videoId && trackKey && trackKey !== `v:${playerSnap.videoId}`) {
+        trackChangedAt = performance.now();
         resetTrackState();
         appliedKey = null;
         lyrics = null;
@@ -1695,11 +1773,23 @@
       if (fullscreen) updateFsMeta();
     }
 
-    const cached = cache.get(track.key);
+    let cached = cache.get(track.key);
     if (cached === 'none') {
-      if ((IS_YT || forcedLyricsSelected()) && ensureUI()) renderStatus('No lyrics found for this song');
-      else teardown();
-      return;
+      // The miss was queried with whatever metadata was available at the time —
+      // if the signature has since improved (queue meta landed, real artist
+      // resolved), evict it and take one more shot rather than caching stale.
+      const sig = noneSig.get(track.key);
+      if (sig && sig !== trackSig(track)) {
+        noneSig.delete(track.key);
+        cache.delete(track.key);
+        cached = undefined;
+      } else if ((IS_YT || forcedLyricsSelected()) && ensureUI()) {
+        renderStatus('No lyrics found for this song');
+        return;
+      } else {
+        teardown();
+        return;
+      }
     }
     if (!ensureUI()) {
       teardown();
@@ -1775,7 +1865,10 @@
     let expected = null;
     if (playerSnap && !playerSnap.ad && isFinite(playerSnap.currentTime) &&
         isFinite(playerSnap.t) && Date.now() - playerSnap.t < 3000 &&
-        trackKey === `v:${playerSnap.videoId}`) {
+        trackKey === `v:${playerSnap.videoId}` &&
+        // videoId and currentTime are sampled from different sources — during
+        // a swap a snapshot can carry the new id with the old tail's clock.
+        !(isFinite(playerSnap.duration) && playerSnap.currentTime > playerSnap.duration + 0.5)) {
       expected = playerSnap.currentTime + (playerSnap.playing ? (Date.now() - playerSnap.t) / 1000 : 0);
     }
     if (v && isFinite(v.currentTime)) {
@@ -2001,10 +2094,11 @@
 
   let poll = null;
   let observer = null;
+  let pageDomAt = 0;
 
   function contextAlive() {
     try {
-      return !!chrome.runtime.id;
+      return !!browserAPI.runtime.id;
     } catch {
       return false;
     }
@@ -2038,8 +2132,12 @@
       // ancestor walk — YouTube's DOM churn makes it wasteful.
       if (!IS_YTM) continue;
       for (const n of m.addedNodes) {
-        if (n.nodeType !== 1 || n === root || n === jumpBtn || n === fsBtn || n === syncChip || n === toastEl) continue;
-        if (n.closest && n.closest('ytmusic-player-page')) return schedule();
+        if (n.nodeType !== 1) continue;
+        if ((n.id && String(n.id).startsWith('ytml')) || (n.closest && n.closest('[id^="ytml"], [class*="ytml"]'))) continue;
+        if (n.closest && n.closest('ytmusic-player-page')) {
+          pageDomAt = performance.now();
+          return schedule();
+        }
       }
     }
   });

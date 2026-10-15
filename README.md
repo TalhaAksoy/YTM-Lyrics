@@ -1,6 +1,6 @@
 # YTM Lyrics+
 
-Karaoke-style synchronized lyrics for YouTube Music **and youtube.com** — a zero-config Chrome extension that upgrades the built-in Lyrics tab with word-by-word highlighting, auto-scroll, click-to-seek, fullscreen mode, and an offline-capable lyrics cache. On regular YouTube it adds a lyrics card next to music videos.
+Karaoke-style synchronized lyrics for YouTube Music **and youtube.com** — a zero-config extension for **Chrome and Firefox** that upgrades the built-in Lyrics tab with word-by-word highlighting, auto-scroll, click-to-seek, fullscreen mode, and an offline-capable lyrics cache. On regular YouTube it adds a lyrics card next to music videos.
 
 ![YTM Lyrics+ — synced lyrics in the player](screenshots/ss-1.png)
 
@@ -28,12 +28,39 @@ Karaoke-style synchronized lyrics for YouTube Music **and youtube.com** — a ze
 
 ## Install
 
-### From source (developer mode)
+### Build (Chrome & Firefox)
 
-1. Clone this repository.
-2. Open `chrome://extensions` in Chrome and enable **Developer mode**.
-3. Click **Load unpacked** and select the repository folder.
-4. Open a song on [music.youtube.com](https://music.youtube.com) — lyrics appear on their own. Music videos on [youtube.com](https://www.youtube.com) get a lyrics card next to the video.
+The extension is plain JavaScript — no bundler. A single dependency-free Node script produces both store packages:
+
+```bash
+npm run build            # dist/chrome + dist/firefox + both zips
+npm run build:chrome     # Chrome target only
+npm run build:firefox    # Firefox target only
+```
+
+Output:
+
+- `dist/chrome/` / `dist/firefox/` — unpacked builds (load these during development)
+- `dist/chrome-extension.zip` / `dist/firefox-extension.zip` — store-ready packages (`manifest.json` at the zip root)
+
+`manifest.json` in the repo root is the Chrome manifest and the single source of truth; `scripts/build.js` derives the Firefox manifest from it (`background.scripts` event page instead of a service worker, plus `browser_specific_settings.gecko`). Requires **Firefox ≥128** — the `world: "MAIN"` content-script field that `sniffer.js` and `player-bridge.js` need only exists there.
+
+### Developer mode
+
+**Chrome:** `chrome://extensions` → enable **Developer mode** → **Load unpacked** → select the repo folder (or `dist/chrome`).
+
+**Firefox:** `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on…** → pick `dist/firefox/manifest.json`. (Temporary add-ons are removed on restart; the zip goes through addons.mozilla.org for a permanent install.)
+
+> **Note:** `dist/` is a build snapshot, not a live view of the repo. After changing source files, run `npm run build` (or the per-target variant) again before reloading — or for Chrome-only iteration, load the **repo root** unpacked and skip building entirely. Firefox development always needs a rebuild because its manifest is generated.
+
+### Firefox notes
+
+- Requires **Firefox ≥128** (the `world: "MAIN"` content-script field).
+- The **floating-window (PiP) button is hidden** — Firefox has no `documentPictureInPicture` API.
+- Temporary add-ons via `about:debugging` are removed when Firefox restarts.
+- Everything else — synced lyrics, cache, fullscreen, search override, youtube.com support — works the same; the code picks `browser.*`/`chrome.*` automatically.
+
+Then open a song on [music.youtube.com](https://music.youtube.com) — lyrics appear on their own. Music videos on [youtube.com](https://www.youtube.com) get a lyrics card next to the video.
 
 A Chrome Web Store listing is in progress.
 
@@ -62,7 +89,7 @@ Only the current track's title, artist, album, and duration are sent to the lyri
 
 ## Notes
 
-- YouTube Music's DOM is internal and undocumented — selectors are defensive: if a panel can't be identified, the extension silently stays out of the way instead of breaking the page. Set `window.__ytmlDebug = true` in the console for diagnostics.
+- YouTube Music's DOM is internal and undocumented — selectors are defensive: if a panel can't be identified, the extension silently stays out of the way instead of breaking the page. Set `localStorage.ytmlDebug = '1'` in the console for `[ytml+]` diagnostic logs.
 - Word-by-word karaoke requires lrc.cx to have a TTML entry for the song; line-synced LRC is used otherwise, and static lyrics are the last resort.
 - Set a custom timing offset by right-clicking a lyric line; click the `↺ sync` chip to reset it.
 
